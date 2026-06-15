@@ -14,6 +14,8 @@ namespace FPSLimiter
     {
         private const string AppDetectionLevelProperty = "AppDetectionLevel";
         private const string FramerateLimitProperty = "FramerateLimit";
+        private const string GlobalProfileDisplayName = "Global";
+        private const string GlobalProfileFileName = "Global";
         private const int ActiveAppDetectionLevel = 3;
         private static readonly ILogger logger = LogManager.GetLogger();
 
@@ -97,8 +99,10 @@ namespace FPSLimiter
 
             EnsureRtssRunning(rtssPath);
 
-            var profileName = Path.GetFileName(executablePath);
-            if (string.IsNullOrWhiteSpace(profileName))
+            var usesGlobalProfile = settings.UseGlobalProfileDuringLaunch;
+            var profileName = usesGlobalProfile ? GlobalProfileDisplayName : Path.GetFileName(executablePath);
+            var apiProfileName = usesGlobalProfile ? string.Empty : profileName;
+            if (!usesGlobalProfile && string.IsNullOrWhiteSpace(profileName))
             {
                 throw new InvalidOperationException("Could not resolve an RTSS profile name for the target executable.");
             }
@@ -107,8 +111,9 @@ namespace FPSLimiter
             {
                 api.Initialize();
 
-                var profileExisted = api.ProfileExists(profileName);
-                var sourceProfileName = profileExisted ? profileName : string.Empty;
+                var profileExisted = usesGlobalProfile || api.ProfileExists(profileName);
+                var sourceProfileName = profileExisted ? apiProfileName : string.Empty;
+                var fileSnapshot = CaptureProfileFile(rtssPath, apiProfileName);
 
                 int originalLimit;
                 var originalLimitAvailable = api.TryGetIntegerProperty(sourceProfileName, FramerateLimitProperty, out originalLimit);
@@ -121,18 +126,46 @@ namespace FPSLimiter
                     { FramerateLimitProperty, frameLimit }
                 };
 
-                if (!profileExisted || originalAppDetectionLevelAvailable)
+                if (!usesGlobalProfile && (!profileExisted || originalAppDetectionLevelAvailable))
                 {
                     properties[AppDetectionLevelProperty] = ActiveAppDetectionLevel;
                 }
-                else
+                else if (!usesGlobalProfile)
                 {
                     logger.Warn($"RTSS did not return {AppDetectionLevelProperty} for existing profile {profileName}; leaving detection level unchanged.");
                 }
 
-                api.SetIntegerProperties(sourceProfileName, profileName, properties);
+                api.SetIntegerProperties(sourceProfileName, apiProfileName, properties);
                 api.UpdateProfiles();
-                LogProfileReadback(api, profileName, "after apply");
+                var readback = LogProfileReadback(api, apiProfileName, profileName, "after SDK apply");
+                var fileFallbackUsed = false;
+
+                if (!readback.LimitAvailable || readback.Limit != frameLimit)
+                {
+                    if (!settings.EnableProfileFileFallback)
+                    {
+                        throw CreateProfilePersistenceException(rtssPath, profileName, frameLimit, readback, null);
+                    }
+
+                    try
+                    {
+                        ApplyProfileFileLimit(rtssPath, apiProfileName, frameLimit);
+                        api.UpdateProfiles();
+                        var fileLimit = ReadProfileFileLimit(rtssPath, apiProfileName);
+                        logger.Info($"RTSS profile file {profileName} after fallback apply: Limit={FormatReadbackValue(fileLimit.HasValue, fileLimit.GetValueOrDefault())}.");
+
+                        if (!fileLimit.HasValue || fileLimit.Value != frameLimit)
+                        {
+                            throw new InvalidOperationException($"RTSS profile file read-back did not match the requested {frameLimit} FPS limit.");
+                        }
+
+                        fileFallbackUsed = true;
+                    }
+                    catch (Exception e)
+                    {
+                        throw CreateProfilePersistenceException(rtssPath, profileName, frameLimit, readback, e);
+                    }
+                }
 
                 return new LimitSessionSnapshot
                 {
@@ -141,11 +174,16 @@ namespace FPSLimiter
                     ExecutablePath = executablePath,
                     ProfileName = profileName,
                     AppliedLimit = frameLimit,
+                    UsesGlobalProfile = usesGlobalProfile,
                     ProfileExisted = profileExisted,
                     OriginalLimitAvailable = originalLimitAvailable,
                     OriginalLimit = originalLimitAvailable ? originalLimit : 0,
                     OriginalAppDetectionLevelAvailable = originalAppDetectionLevelAvailable,
                     OriginalAppDetectionLevel = originalAppDetectionLevelAvailable ? originalAppDetectionLevel : 0,
+                    FileFallbackUsed = fileFallbackUsed,
+                    ProfileFilePath = fileSnapshot.Path,
+                    OriginalProfileFileExisted = fileSnapshot.Exists,
+                    OriginalProfileFileContent = fileSnapshot.Content,
                     StartedAt = DateTime.UtcNow
                 };
             }
@@ -165,6 +203,15 @@ namespace FPSLimiter
             {
                 api.Initialize();
 
+                if (snapshot.FileFallbackUsed)
+                {
+                    RestoreProfileFile(snapshot);
+                    api.UpdateProfiles();
+                    logger.Info($"Restored RTSS profile file {snapshot.ProfileName} after {snapshot.GameName}.");
+                    return;
+                }
+
+                var apiProfileName = snapshot.UsesGlobalProfile ? string.Empty : snapshot.ProfileName;
                 if (snapshot.ProfileExisted)
                 {
                     var limit = snapshot.OriginalLimitAvailable ? snapshot.OriginalLimit : 0;
@@ -178,7 +225,7 @@ namespace FPSLimiter
                         properties[AppDetectionLevelProperty] = snapshot.OriginalAppDetectionLevel;
                     }
 
-                    api.SetIntegerProperties(snapshot.ProfileName, snapshot.ProfileName, properties);
+                    api.SetIntegerProperties(apiProfileName, apiProfileName, properties);
                 }
                 else
                 {
@@ -188,28 +235,233 @@ namespace FPSLimiter
                 api.UpdateProfiles();
                 if (snapshot.ProfileExisted)
                 {
-                    LogProfileReadback(api, snapshot.ProfileName, "after restore");
+                    LogProfileReadback(api, apiProfileName, snapshot.ProfileName, "after restore");
                 }
             }
         }
 
-        private static void LogProfileReadback(RtssProfileApi api, string profileName, string action)
+        private static ProfileReadback LogProfileReadback(RtssProfileApi api, string apiProfileName, string displayProfileName, string action)
         {
             int limit;
-            var limitAvailable = api.TryGetIntegerProperty(profileName, FramerateLimitProperty, out limit);
+            var limitAvailable = api.TryGetIntegerProperty(apiProfileName, FramerateLimitProperty, out limit);
 
             int appDetectionLevel;
-            var appDetectionLevelAvailable = api.TryGetIntegerProperty(profileName, AppDetectionLevelProperty, out appDetectionLevel);
+            var appDetectionLevelAvailable = api.TryGetIntegerProperty(apiProfileName, AppDetectionLevelProperty, out appDetectionLevel);
 
             logger.Info(
-                $"RTSS profile {profileName} {action}: " +
+                $"RTSS profile {displayProfileName} {action}: " +
                 $"{FramerateLimitProperty}={FormatReadbackValue(limitAvailable, limit)}, " +
                 $"{AppDetectionLevelProperty}={FormatReadbackValue(appDetectionLevelAvailable, appDetectionLevel)}.");
+
+            return new ProfileReadback
+            {
+                LimitAvailable = limitAvailable,
+                Limit = limit,
+                AppDetectionLevelAvailable = appDetectionLevelAvailable,
+                AppDetectionLevel = appDetectionLevel
+            };
         }
 
         private static string FormatReadbackValue(bool available, int value)
         {
             return available ? value.ToString() : "unavailable";
+        }
+
+        private static InvalidOperationException CreateProfilePersistenceException(
+            string rtssPath,
+            string profileName,
+            int requestedLimit,
+            ProfileReadback readback,
+            Exception innerException)
+        {
+            var profilesDirectory = GetProfilesDirectory(rtssPath);
+            var message =
+                $"RTSS did not persist the requested {requestedLimit} FPS limit for profile {profileName}. " +
+                $"RTSS read-back stayed at {FormatReadbackValue(readback.LimitAvailable, readback.Limit)}. " +
+                $"This usually means Playnite cannot write to the RTSS Profiles folder: {profilesDirectory}. " +
+                "Run Playnite as administrator, grant Modify permission to that folder, or install RTSS in a writable location.";
+
+            return innerException == null
+                ? new InvalidOperationException(message)
+                : new InvalidOperationException(message, innerException);
+        }
+
+        private static ProfileFileSnapshot CaptureProfileFile(string rtssPath, string apiProfileName)
+        {
+            var path = GetProfileFilePath(rtssPath, apiProfileName);
+            if (!File.Exists(path))
+            {
+                return new ProfileFileSnapshot { Path = path };
+            }
+
+            return new ProfileFileSnapshot
+            {
+                Path = path,
+                Exists = true,
+                Content = File.ReadAllText(path, Encoding.Default)
+            };
+        }
+
+        private static void ApplyProfileFileLimit(string rtssPath, string apiProfileName, int frameLimit)
+        {
+            var path = GetProfileFilePath(rtssPath, apiProfileName);
+            var profileText = File.Exists(path)
+                ? File.ReadAllText(path, Encoding.Default)
+                : ReadDefaultProfileText(rtssPath);
+
+            profileText = SetProfileValue(profileText, "Framerate", "Limit", frameLimit.ToString());
+            profileText = SetProfileValue(profileText, "Framerate", "LimitDenominator", "1");
+            profileText = SetProfileValue(profileText, "Hooking", "EnableHooking", "1");
+
+            File.WriteAllText(path, profileText, Encoding.Default);
+        }
+
+        private static int? ReadProfileFileLimit(string rtssPath, string apiProfileName)
+        {
+            var path = GetProfileFilePath(rtssPath, apiProfileName);
+            if (!File.Exists(path))
+            {
+                return null;
+            }
+
+            var profileText = File.ReadAllText(path, Encoding.Default);
+            var value = GetProfileValue(profileText, "Framerate", "Limit");
+            int limit;
+            return int.TryParse(value, out limit) ? (int?)limit : null;
+        }
+
+        private static void RestoreProfileFile(LimitSessionSnapshot snapshot)
+        {
+            if (string.IsNullOrWhiteSpace(snapshot.ProfileFilePath))
+            {
+                throw new InvalidOperationException($"RTSS profile file path was not captured for {snapshot.ProfileName}.");
+            }
+
+            if (snapshot.OriginalProfileFileExisted)
+            {
+                File.WriteAllText(snapshot.ProfileFilePath, snapshot.OriginalProfileFileContent ?? string.Empty, Encoding.Default);
+            }
+            else if (File.Exists(snapshot.ProfileFilePath))
+            {
+                File.Delete(snapshot.ProfileFilePath);
+            }
+        }
+
+        private static string ReadDefaultProfileText(string rtssPath)
+        {
+            var globalPath = GetProfileFilePath(rtssPath, string.Empty);
+            if (!File.Exists(globalPath))
+            {
+                throw new FileNotFoundException("RTSS Global profile file was not found.", globalPath);
+            }
+
+            return File.ReadAllText(globalPath, Encoding.Default);
+        }
+
+        private static string GetProfilesDirectory(string rtssPath)
+        {
+            return Path.Combine(Path.GetDirectoryName(rtssPath), "Profiles");
+        }
+
+        private static string GetProfileFilePath(string rtssPath, string apiProfileName)
+        {
+            var fileName = string.IsNullOrWhiteSpace(apiProfileName)
+                ? GlobalProfileFileName
+                : apiProfileName.EndsWith(".cfg", StringComparison.OrdinalIgnoreCase)
+                    ? apiProfileName
+                    : apiProfileName + ".cfg";
+
+            return Path.Combine(GetProfilesDirectory(rtssPath), fileName);
+        }
+
+        private static string SetProfileValue(string text, string section, string key, string value)
+        {
+            var newline = text.Contains("\r\n") ? "\r\n" : "\n";
+            var normalized = text.Replace("\r\n", "\n");
+            var lines = normalized.Split('\n').ToList();
+            var sectionHeader = "[" + section + "]";
+            var inSection = false;
+            var sectionFound = false;
+
+            for (var i = 0; i < lines.Count; i++)
+            {
+                var trimmed = lines[i].Trim();
+                if (trimmed.StartsWith("[") && trimmed.EndsWith("]"))
+                {
+                    if (inSection)
+                    {
+                        lines.Insert(i, key + "=" + value);
+                        return string.Join(newline, lines);
+                    }
+
+                    inSection = string.Equals(trimmed, sectionHeader, StringComparison.OrdinalIgnoreCase);
+                    sectionFound = sectionFound || inSection;
+                    continue;
+                }
+
+                if (inSection && trimmed.StartsWith(key + "=", StringComparison.OrdinalIgnoreCase))
+                {
+                    lines[i] = key + "=" + value;
+                    return string.Join(newline, lines);
+                }
+            }
+
+            if (sectionFound)
+            {
+                lines.Add(key + "=" + value);
+            }
+            else
+            {
+                if (lines.Count > 0 && !string.IsNullOrWhiteSpace(lines.Last()))
+                {
+                    lines.Add(string.Empty);
+                }
+
+                lines.Add(sectionHeader);
+                lines.Add(key + "=" + value);
+            }
+
+            return string.Join(newline, lines);
+        }
+
+        private static string GetProfileValue(string text, string section, string key)
+        {
+            var normalized = text.Replace("\r\n", "\n");
+            var lines = normalized.Split('\n');
+            var sectionHeader = "[" + section + "]";
+            var inSection = false;
+
+            foreach (var line in lines)
+            {
+                var trimmed = line.Trim();
+                if (trimmed.StartsWith("[") && trimmed.EndsWith("]"))
+                {
+                    inSection = string.Equals(trimmed, sectionHeader, StringComparison.OrdinalIgnoreCase);
+                    continue;
+                }
+
+                if (inSection && trimmed.StartsWith(key + "=", StringComparison.OrdinalIgnoreCase))
+                {
+                    return trimmed.Substring(key.Length + 1).Trim();
+                }
+            }
+
+            return null;
+        }
+
+        private class ProfileReadback
+        {
+            public bool LimitAvailable { get; set; }
+            public int Limit { get; set; }
+            public bool AppDetectionLevelAvailable { get; set; }
+            public int AppDetectionLevel { get; set; }
+        }
+
+        private class ProfileFileSnapshot
+        {
+            public string Path { get; set; }
+            public bool Exists { get; set; }
+            public string Content { get; set; }
         }
 
         private class RtssProfileApi : IDisposable

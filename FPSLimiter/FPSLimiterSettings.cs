@@ -11,6 +11,8 @@ namespace FPSLimiter
     {
         private string rtssPath = string.Empty;
         private bool autoStartRtss = true;
+        private bool useGlobalProfileDuringLaunch = true;
+        private bool enableProfileFileFallback = true;
         private string presetsText = "30, 60, 120";
         private List<GameLimitProfile> gameLimits = new List<GameLimitProfile>();
         private List<LimitSessionSnapshot> activeSessions = new List<LimitSessionSnapshot>();
@@ -25,6 +27,18 @@ namespace FPSLimiter
         {
             get => autoStartRtss;
             set => SetValue(ref autoStartRtss, value);
+        }
+
+        public bool UseGlobalProfileDuringLaunch
+        {
+            get => useGlobalProfileDuringLaunch;
+            set => SetValue(ref useGlobalProfileDuringLaunch, value);
+        }
+
+        public bool EnableProfileFileFallback
+        {
+            get => enableProfileFileFallback;
+            set => SetValue(ref enableProfileFileFallback, value);
         }
 
         public string PresetsText
@@ -118,11 +132,16 @@ namespace FPSLimiter
         public string ExecutablePath { get; set; }
         public string ProfileName { get; set; }
         public int AppliedLimit { get; set; }
+        public bool UsesGlobalProfile { get; set; }
         public bool ProfileExisted { get; set; }
         public bool OriginalLimitAvailable { get; set; }
         public int OriginalLimit { get; set; }
         public bool OriginalAppDetectionLevelAvailable { get; set; }
         public int OriginalAppDetectionLevel { get; set; }
+        public bool FileFallbackUsed { get; set; }
+        public string ProfileFilePath { get; set; }
+        public bool OriginalProfileFileExisted { get; set; }
+        public string OriginalProfileFileContent { get; set; }
         public DateTime StartedAt { get; set; }
     }
 

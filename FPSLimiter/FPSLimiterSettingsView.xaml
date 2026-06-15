@@ -19,7 +19,23 @@
 
             <CheckBox Content="Start RTSS automatically when applying a cap"
                       IsChecked="{Binding Settings.AutoStartRtss}"
-                      Margin="0,0,0,16" />
+                      Margin="0,0,0,8" />
+
+            <CheckBox Content="Use RTSS Global profile while capped games are running"
+                      IsChecked="{Binding Settings.UseGlobalProfileDuringLaunch}"
+                      Margin="0,0,0,4" />
+            <TextBlock Text="This is more reliable when per-executable RTSS profiles do not apply. The previous Global cap is restored when Playnite detects the game stopped."
+                       TextWrapping="Wrap"
+                       Opacity="0.72"
+                       Margin="0,0,0,8" />
+
+            <CheckBox Content="Try direct RTSS profile file edits if the SDK save does not stick"
+                      IsChecked="{Binding Settings.EnableProfileFileFallback}"
+                      Margin="0,0,0,4" />
+            <TextBlock Text="Requires Playnite to have write access to the RTSS Profiles folder, for example by running Playnite elevated or changing that folder's permissions."
+                       TextWrapping="Wrap"
+                       Opacity="0.72"
+                       Margin="0,0,0,16" />
 
             <TextBlock Text="FPS presets"
                        Margin="0,0,0,4" />

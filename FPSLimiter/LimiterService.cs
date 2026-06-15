@@ -88,7 +88,7 @@ namespace FPSLimiter
             }
 
             var target = targetResolver.ResolveTarget(game, profile, sourceAction, startedProcessId);
-            if (string.IsNullOrWhiteSpace(target))
+            if (string.IsNullOrWhiteSpace(target) && !Settings.UseGlobalProfileDuringLaunch)
             {
                 if (showError)
                 {
@@ -101,13 +101,17 @@ namespace FPSLimiter
             }
 
             var existingSession = Settings.ActiveSessions.FirstOrDefault(a => a.GameId == game.Id);
-            var profileName = Path.GetFileName(target);
+            var profileName = Settings.UseGlobalProfileDuringLaunch ? "Global" : Path.GetFileName(target);
             if (existingSession != null)
             {
                 if (string.Equals(existingSession.ProfileName, profileName, StringComparison.OrdinalIgnoreCase) &&
                     existingSession.AppliedLimit == profile.FrameLimit)
                 {
-                    profile.LastResolvedExecutable = target;
+                    if (!string.IsNullOrWhiteSpace(target))
+                    {
+                        profile.LastResolvedExecutable = target;
+                    }
+
                     settingsViewModel.SaveSettings();
                     return true;
                 }
@@ -120,7 +124,11 @@ namespace FPSLimiter
                 var session = rtssBackend.ApplyLimit(game.Id, game.Name, target, profile.FrameLimit);
                 Settings.ActiveSessions.RemoveAll(a => a.GameId == game.Id);
                 Settings.ActiveSessions.Add(session);
-                profile.LastResolvedExecutable = target;
+                if (!string.IsNullOrWhiteSpace(target))
+                {
+                    profile.LastResolvedExecutable = target;
+                }
+
                 settingsViewModel.SaveSettings();
                 logger.Info($"Applied {profile.FrameLimit} FPS limit to {game.Name} via RTSS profile {session.ProfileName}.");
                 return true;
@@ -145,6 +153,12 @@ namespace FPSLimiter
             var profile = Settings.GetGameProfile(game.Id);
             if (profile == null || !profile.Enabled || profile.FrameLimit <= 0)
             {
+                return;
+            }
+
+            if (Settings.UseGlobalProfileDuringLaunch)
+            {
+                logger.Debug($"FPS Limiter is using the RTSS Global profile for {game.Name}; launch retargeting is skipped.");
                 return;
             }
 
