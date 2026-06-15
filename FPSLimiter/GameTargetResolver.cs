@@ -7,6 +7,8 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Management;
+using System.Runtime.InteropServices;
+using System.Text;
 using System.Threading;
 
 namespace FPSLimiter
@@ -92,6 +94,12 @@ namespace FPSLimiter
                 }
 
                 candidate = GetBestInstallDirectoryExecutable(game, currentExecutablePath);
+                if (IsValidExecutable(candidate))
+                {
+                    return candidate;
+                }
+
+                candidate = GetBestWindowExecutable(game, currentExecutablePath);
                 if (IsValidExecutable(candidate))
                 {
                     return candidate;
@@ -197,6 +205,50 @@ namespace FPSLimiter
             }
         }
 
+        private string GetBestWindowExecutable(Game game, string currentExecutablePath)
+        {
+            try
+            {
+                var installRoot = ResolveInstallRoot(game, currentExecutablePath);
+                var words = GetSignificantWords(game?.Name).ToList();
+                var windows = QueryWindowProcesses()
+                    .Where(a => IsValidExecutable(a.ExecutablePath))
+                    .Where(a =>
+                        (!string.IsNullOrWhiteSpace(installRoot) && IsUnderDirectory(a.ExecutablePath, installRoot)) ||
+                        words.Any(word =>
+                            (a.WindowTitle ?? string.Empty).IndexOf(word, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                            (a.Name ?? string.Empty).IndexOf(word, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                            (a.ExecutablePath ?? string.Empty).IndexOf(word, StringComparison.OrdinalIgnoreCase) >= 0))
+                    .ToList();
+
+                if (!windows.Any())
+                {
+                    return null;
+                }
+
+                var currentFile = string.IsNullOrWhiteSpace(currentExecutablePath)
+                    ? null
+                    : Path.GetFileName(currentExecutablePath);
+
+                var best = windows
+                    .OrderByDescending(a => ScoreProcess(a, currentFile, game?.Name))
+                    .ThenByDescending(a => a.ProcessId)
+                    .FirstOrDefault();
+
+                if (best != null)
+                {
+                    logger.Debug($"FPS Limiter window target candidate for {game?.Name}: PID={best.ProcessId}, EXE={best.ExecutablePath}, TITLE={best.WindowTitle}.");
+                }
+
+                return best?.ExecutablePath;
+            }
+            catch (Exception e)
+            {
+                logger.Debug(e, $"Could not inspect top-level windows for {game?.Name}.");
+                return null;
+            }
+        }
+
         private static List<ProcessInfo> QueryProcesses()
         {
             var result = new List<ProcessInfo>();
@@ -222,6 +274,74 @@ namespace FPSLimiter
             }
 
             return result;
+        }
+
+        private static List<ProcessInfo> QueryWindowProcesses()
+        {
+            var result = new List<ProcessInfo>();
+
+            EnumWindows((hWnd, lParam) =>
+            {
+                if (!IsWindowVisible(hWnd))
+                {
+                    return true;
+                }
+
+                var title = GetWindowTitle(hWnd);
+                if (string.IsNullOrWhiteSpace(title))
+                {
+                    return true;
+                }
+
+                uint processId;
+                GetWindowThreadProcessId(hWnd, out processId);
+                if (processId == 0)
+                {
+                    return true;
+                }
+
+                try
+                {
+                    using (var process = Process.GetProcessById((int)processId))
+                    {
+                        result.Add(new ProcessInfo
+                        {
+                            ProcessId = (int)processId,
+                            ParentProcessId = 0,
+                            ExecutablePath = ResolveProcessPath(process),
+                            Name = process.ProcessName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
+                                ? process.ProcessName
+                                : process.ProcessName + ".exe",
+                            WindowTitle = title
+                        });
+                    }
+                }
+                catch
+                {
+                    // Window may belong to a process that exited between enumeration and lookup.
+                }
+
+                return true;
+            }, IntPtr.Zero);
+
+            return result
+                .GroupBy(a => a.ProcessId)
+                .Select(a => a.First())
+                .ToList();
+        }
+
+        private static string ResolveProcessPath(Process process)
+        {
+            try
+            {
+                return process.MainModule.FileName;
+            }
+            catch
+            {
+                return process.ProcessName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
+                    ? process.ProcessName
+                    : process.ProcessName + ".exe";
+            }
         }
 
         private static IEnumerable<ProcessInfo> GetDescendants(List<ProcessInfo> processes, int rootProcessId)
@@ -279,7 +399,8 @@ namespace FPSLimiter
             foreach (var word in GetSignificantWords(gameName))
             {
                 if (fileName.IndexOf(word, StringComparison.OrdinalIgnoreCase) >= 0 ||
-                    process.ExecutablePath.IndexOf(word, StringComparison.OrdinalIgnoreCase) >= 0)
+                    process.ExecutablePath.IndexOf(word, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    (process.WindowTitle ?? string.Empty).IndexOf(word, StringComparison.OrdinalIgnoreCase) >= 0)
                 {
                     score += 10;
                 }
@@ -396,8 +517,21 @@ namespace FPSLimiter
         private static bool IsValidExecutable(string path)
         {
             return !string.IsNullOrWhiteSpace(path) &&
-                   File.Exists(path) &&
-                   string.Equals(Path.GetExtension(path), ".exe", StringComparison.OrdinalIgnoreCase);
+                   string.Equals(Path.GetExtension(path), ".exe", StringComparison.OrdinalIgnoreCase) &&
+                   (!Path.IsPathRooted(path) || File.Exists(path));
+        }
+
+        private static string GetWindowTitle(IntPtr hWnd)
+        {
+            var length = GetWindowTextLength(hWnd);
+            if (length <= 0)
+            {
+                return string.Empty;
+            }
+
+            var builder = new StringBuilder(length + 1);
+            GetWindowText(hWnd, builder, builder.Capacity);
+            return builder.ToString();
         }
 
         private class ProcessInfo
@@ -406,6 +540,24 @@ namespace FPSLimiter
             public int ParentProcessId { get; set; }
             public string ExecutablePath { get; set; }
             public string Name { get; set; }
+            public string WindowTitle { get; set; }
         }
+
+        private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+        [DllImport("user32.dll")]
+        private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+        [DllImport("user32.dll")]
+        private static extern bool IsWindowVisible(IntPtr hWnd);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern int GetWindowTextLength(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
     }
 }
