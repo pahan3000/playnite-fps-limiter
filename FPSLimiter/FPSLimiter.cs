@@ -14,6 +14,7 @@ namespace FPSLimiter
     public class FPSLimiter : GenericPlugin
     {
         private static readonly ILogger logger = LogManager.GetLogger();
+        private const string ActiveMenuPrefix = "\u2713 ";
 
         private FPSLimiterSettingsViewModel settings;
         private LimiterService limiterService;
@@ -86,7 +87,7 @@ namespace FPSLimiter
             yield return new GameMenuItem
             {
                 MenuSection = "FPS Limiter",
-                Description = "Custom FPS cap...",
+                Description = GetCustomMenuText(games),
                 Action = _ => SetCustomCap(games)
             };
 
@@ -96,6 +97,11 @@ namespace FPSLimiter
                 Description = "Disable FPS cap",
                 Action = _ => limiterService.DisableGameLimit(games)
             };
+
+            if (PlayniteApi.ApplicationInfo.Mode != ApplicationMode.Desktop)
+            {
+                yield break;
+            }
 
             yield return new GameMenuItem
             {
@@ -114,22 +120,7 @@ namespace FPSLimiter
 
         public override IEnumerable<MainMenuItem> GetMainMenuItems(GetMainMenuItemsArgs args)
         {
-            foreach (var preset in limiterService.GetPresets())
-            {
-                yield return new MainMenuItem
-                {
-                    MenuSection = "@FPS Limiter",
-                    Description = $"Set selected game to {preset} FPS",
-                    Action = _ => SetPresetForSelectedGame(preset)
-                };
-            }
-
-            yield return new MainMenuItem
-            {
-                MenuSection = "@FPS Limiter",
-                Description = "Disable cap for selected game",
-                Action = _ => DisableSelectedGame()
-            };
+            return Enumerable.Empty<MainMenuItem>();
         }
 
         public override ISettings GetSettings(bool firstRunSettings)
@@ -149,11 +140,28 @@ namespace FPSLimiter
                 var profile = limiterService.GetGameProfile(games[0]);
                 if (profile != null && profile.Enabled && profile.FrameLimit == preset)
                 {
-                    return $"{preset} FPS [active]";
+                    return $"{ActiveMenuPrefix}{preset} FPS";
                 }
             }
 
             return $"{preset} FPS";
+        }
+
+        private string GetCustomMenuText(List<Game> games)
+        {
+            if (games.Count == 1)
+            {
+                var profile = limiterService.GetGameProfile(games[0]);
+                if (profile != null &&
+                    profile.Enabled &&
+                    profile.FrameLimit > 0 &&
+                    !limiterService.GetPresets().Contains(profile.FrameLimit))
+                {
+                    return $"{ActiveMenuPrefix}Custom FPS cap...";
+                }
+            }
+
+            return "Custom FPS cap...";
         }
 
         private void SetCustomCap(List<Game> games)
@@ -218,46 +226,5 @@ namespace FPSLimiter
             limiterService.ClearManualExecutable(games[0]);
         }
 
-        private void SetPresetForSelectedGame(int preset)
-        {
-            var selectedGame = GetSingleSelectedGame();
-            if (selectedGame == null)
-            {
-                return;
-            }
-
-            limiterService.SetGameLimit(new[] { selectedGame }, preset);
-        }
-
-        private void DisableSelectedGame()
-        {
-            var selectedGame = GetSingleSelectedGame();
-            if (selectedGame == null)
-            {
-                return;
-            }
-
-            limiterService.DisableGameLimit(new[] { selectedGame });
-        }
-
-        private Game GetSingleSelectedGame()
-        {
-            var selectedGames = PlayniteApi.MainView.SelectedGames?.ToList() ?? new List<Game>();
-            if (selectedGames.Count == 1)
-            {
-                return selectedGames[0];
-            }
-
-            if (selectedGames.Count == 0)
-            {
-                PlayniteApi.Dialogs.ShowErrorMessage("Select a game before using FPS Limiter.", "FPS Limiter");
-            }
-            else
-            {
-                PlayniteApi.Dialogs.ShowErrorMessage("Select only one game before using FPS Limiter from the fullscreen Extensions menu.", "FPS Limiter");
-            }
-
-            return null;
-        }
     }
 }

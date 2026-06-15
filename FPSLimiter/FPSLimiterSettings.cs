@@ -13,7 +13,6 @@ namespace FPSLimiter
         private string rtssPath = string.Empty;
         private bool autoStartRtss = true;
         private bool useGlobalProfileDuringLaunch = true;
-        private bool enableProfileFileFallback = true;
         private string presetsText = "30, 60, 120";
         private List<GameLimitProfile> gameLimits = new List<GameLimitProfile>();
         private List<LimitSessionSnapshot> activeSessions = new List<LimitSessionSnapshot>();
@@ -34,12 +33,6 @@ namespace FPSLimiter
         {
             get => useGlobalProfileDuringLaunch;
             set => SetValue(ref useGlobalProfileDuringLaunch, value);
-        }
-
-        public bool EnableProfileFileFallback
-        {
-            get => enableProfileFileFallback;
-            set => SetValue(ref enableProfileFileFallback, value);
         }
 
         public string PresetsText
@@ -173,6 +166,7 @@ namespace FPSLimiter
 
             var savedSettings = plugin.LoadPluginSettings<FPSLimiterSettings>();
             Settings = savedSettings ?? new FPSLimiterSettings();
+            PopulateDetectedRtssPathIfEmpty();
 
             TestRtssProfilePermissionsCommand = new RelayCommand(TestRtssProfilePermissions);
             FixRtssProfilePermissionsCommand = new RelayCommand(FixRtssProfilePermissions);
@@ -185,6 +179,7 @@ namespace FPSLimiter
 
         public void BeginEdit()
         {
+            PopulateDetectedRtssPathIfEmpty();
             editingClone = Serialization.GetClone(Settings);
         }
 
@@ -231,6 +226,26 @@ namespace FPSLimiter
         {
             Settings.PresetsText = string.Join(", ", Settings.GetPresetValues());
             Settings.RtssPath = Settings.RtssPath?.Trim() ?? string.Empty;
+        }
+
+        private void PopulateDetectedRtssPathIfEmpty()
+        {
+            if (!string.IsNullOrWhiteSpace(Settings.RtssPath))
+            {
+                return;
+            }
+
+            try
+            {
+                var detectedPath = new RtssLimiterBackend(Settings).ResolveRtssPath();
+                if (!string.IsNullOrWhiteSpace(detectedPath))
+                {
+                    Settings.RtssPath = detectedPath;
+                }
+            }
+            catch
+            {
+            }
         }
 
         private void TestRtssProfilePermissions()

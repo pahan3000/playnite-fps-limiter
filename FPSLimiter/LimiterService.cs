@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Windows;
 
 namespace FPSLimiter
 {
@@ -81,6 +82,11 @@ namespace FPSLimiter
 
         public bool TryApplyForGame(Game game, GameAction sourceAction, int? startedProcessId, bool showError)
         {
+            return TryApplyForGame(game, sourceAction, startedProcessId, showError, true);
+        }
+
+        private bool TryApplyForGame(Game game, GameAction sourceAction, int? startedProcessId, bool showError, bool allowPermissionSetup)
+        {
             var profile = Settings.GetGameProfile(game.Id);
             if (profile == null || !profile.Enabled || profile.FrameLimit <= 0)
             {
@@ -139,13 +145,92 @@ namespace FPSLimiter
 
                 if (showError)
                 {
-                    playniteApi.Dialogs.ShowErrorMessage(
-                        $"FPS Limiter could not apply the {profile.FrameLimit} FPS cap to {game.Name}.\n\n{e.Message}",
-                        "FPS Limiter");
+                    if (allowPermissionSetup && ShouldOfferRtssAccessSetup(e))
+                    {
+                        if (OfferRtssAccessSetup(game, profile.FrameLimit, e))
+                        {
+                            return TryApplyForGame(game, sourceAction, startedProcessId, showError, false);
+                        }
+                    }
+                    else
+                    {
+                        playniteApi.Dialogs.ShowErrorMessage(
+                            $"FPS Limiter could not apply the {profile.FrameLimit} FPS cap to {game.Name}.\n\n{e.Message}",
+                            "FPS Limiter");
+                    }
                 }
 
                 return false;
             }
+        }
+
+        private bool OfferRtssAccessSetup(Game game, int frameLimit, Exception originalError)
+        {
+            var setupOption = new MessageBoxOption("Set up RTSS access", true, false);
+            var continueOption = new MessageBoxOption("Continue without cap", false, true);
+            var selected = playniteApi.Dialogs.ShowMessage(
+                $"FPS Limiter could not apply the {frameLimit} FPS cap to {game.Name}.\n\n" +
+                "Windows is blocking write access to RTSS profile files, so RTSS kept its previous settings.\n\n" +
+                "Set up RTSS access to allow this Windows user to edit RTSS profiles, or continue launching the game without a cap.\n\n" +
+                $"Details:\n{originalError.Message}",
+                "FPS Limiter",
+                MessageBoxImage.Warning,
+                new List<MessageBoxOption> { setupOption, continueOption });
+
+            if (selected != setupOption)
+            {
+                return false;
+            }
+
+            try
+            {
+                rtssBackend.GrantProfilesModifyPermissionToCurrentUser();
+                var result = rtssBackend.TestProfileWriteAccess();
+
+                if (result.Success)
+                {
+                    playniteApi.Dialogs.ShowMessage(
+                        "RTSS access is ready. FPS Limiter will try the cap again.",
+                        "FPS Limiter");
+                    return true;
+                }
+
+                playniteApi.Dialogs.ShowErrorMessage(
+                    $"FPS Limiter ran the RTSS access setup, but the write test still failed.\n\n{result.Message}",
+                    "FPS Limiter");
+                return false;
+            }
+            catch (Exception e)
+            {
+                playniteApi.Dialogs.ShowErrorMessage(
+                    $"FPS Limiter could not set up RTSS access.\n\n{e.Message}",
+                    "FPS Limiter");
+                return false;
+            }
+        }
+
+        private static bool ShouldOfferRtssAccessSetup(Exception error)
+        {
+            var current = error;
+            while (current != null)
+            {
+                if (current is UnauthorizedAccessException)
+                {
+                    return true;
+                }
+
+                var message = current.Message ?? string.Empty;
+                if (message.IndexOf("RTSS Profiles folder", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    message.IndexOf("cannot write", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    message.IndexOf("access", StringComparison.OrdinalIgnoreCase) >= 0 && message.IndexOf("denied", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return true;
+                }
+
+                current = current.InnerException;
+            }
+
+            return false;
         }
 
         public void RetargetAfterLaunch(Game game, GameAction sourceAction, int? startedProcessId)

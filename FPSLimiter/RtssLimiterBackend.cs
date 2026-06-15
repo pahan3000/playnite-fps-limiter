@@ -14,11 +14,8 @@ namespace FPSLimiter
 {
     public class RtssLimiterBackend
     {
-        private const string AppDetectionLevelProperty = "AppDetectionLevel";
-        private const string FramerateLimitProperty = "FramerateLimit";
         private const string GlobalProfileDisplayName = "Global";
         private const string GlobalProfileFileName = "Global";
-        private const int ActiveAppDetectionLevel = 3;
         private static readonly ILogger logger = LogManager.GetLogger();
 
         private readonly FPSLimiterSettings settings;
@@ -212,86 +209,41 @@ namespace FPSLimiter
                 throw new InvalidOperationException("Could not resolve an RTSS profile name for the target executable.");
             }
 
-            using (var api = new RtssProfileApi(rtssPath))
+            var profileExisted = File.Exists(GetProfileFilePath(rtssPath, apiProfileName));
+            var fileSnapshot = CaptureProfileFile(rtssPath, apiProfileName);
+
+            try
             {
-                api.Initialize();
+                ApplyProfileFileLimit(rtssPath, apiProfileName, frameLimit);
+                RefreshRtssProfiles(rtssPath);
+                var fileLimit = ReadProfileFileLimit(rtssPath, apiProfileName);
+                logger.Info($"RTSS profile file {profileName} after apply: Limit={FormatFileReadback(fileLimit)}.");
 
-                var profileExisted = usesGlobalProfile || api.ProfileExists(profileName);
-                var sourceProfileName = profileExisted ? apiProfileName : string.Empty;
-                var fileSnapshot = CaptureProfileFile(rtssPath, apiProfileName);
-
-                int originalLimit;
-                var originalLimitAvailable = api.TryGetIntegerProperty(sourceProfileName, FramerateLimitProperty, out originalLimit);
-
-                int originalAppDetectionLevel;
-                var originalAppDetectionLevelAvailable = api.TryGetIntegerProperty(sourceProfileName, AppDetectionLevelProperty, out originalAppDetectionLevel);
-
-                var properties = new Dictionary<string, int>
+                if (!fileLimit.HasValue || fileLimit.Value != frameLimit)
                 {
-                    { FramerateLimitProperty, frameLimit }
-                };
-
-                if (!usesGlobalProfile && (!profileExisted || originalAppDetectionLevelAvailable))
-                {
-                    properties[AppDetectionLevelProperty] = ActiveAppDetectionLevel;
+                    throw CreateProfileFilePersistenceException(rtssPath, profileName, frameLimit, null);
                 }
-                else if (!usesGlobalProfile)
-                {
-                    logger.Warn($"RTSS did not return {AppDetectionLevelProperty} for existing profile {profileName}; leaving detection level unchanged.");
-                }
-
-                api.SetIntegerProperties(sourceProfileName, apiProfileName, properties);
-                api.UpdateProfiles();
-                var readback = LogProfileReadback(api, apiProfileName, profileName, "after SDK apply");
-                var fileFallbackUsed = false;
-
-                if (!readback.LimitAvailable || readback.Limit != frameLimit)
-                {
-                    if (!settings.EnableProfileFileFallback)
-                    {
-                        throw CreateProfilePersistenceException(rtssPath, profileName, frameLimit, readback, null);
-                    }
-
-                    try
-                    {
-                        ApplyProfileFileLimit(rtssPath, apiProfileName, frameLimit);
-                        api.UpdateProfiles();
-                        var fileLimit = ReadProfileFileLimit(rtssPath, apiProfileName);
-                        logger.Info($"RTSS profile file {profileName} after fallback apply: Limit={FormatReadbackValue(fileLimit.HasValue, fileLimit.GetValueOrDefault())}.");
-
-                        if (!fileLimit.HasValue || fileLimit.Value != frameLimit)
-                        {
-                            throw new InvalidOperationException($"RTSS profile file read-back did not match the requested {frameLimit} FPS limit.");
-                        }
-
-                        fileFallbackUsed = true;
-                    }
-                    catch (Exception e)
-                    {
-                        throw CreateProfilePersistenceException(rtssPath, profileName, frameLimit, readback, e);
-                    }
-                }
-
-                return new LimitSessionSnapshot
-                {
-                    GameId = gameId,
-                    GameName = gameName,
-                    ExecutablePath = executablePath,
-                    ProfileName = profileName,
-                    AppliedLimit = frameLimit,
-                    UsesGlobalProfile = usesGlobalProfile,
-                    ProfileExisted = profileExisted,
-                    OriginalLimitAvailable = originalLimitAvailable,
-                    OriginalLimit = originalLimitAvailable ? originalLimit : 0,
-                    OriginalAppDetectionLevelAvailable = originalAppDetectionLevelAvailable,
-                    OriginalAppDetectionLevel = originalAppDetectionLevelAvailable ? originalAppDetectionLevel : 0,
-                    FileFallbackUsed = fileFallbackUsed,
-                    ProfileFilePath = fileSnapshot.Path,
-                    OriginalProfileFileExisted = fileSnapshot.Exists,
-                    OriginalProfileFileContent = fileSnapshot.Content,
-                    StartedAt = DateTime.UtcNow
-                };
             }
+            catch (Exception e) when (!(e is InvalidOperationException))
+            {
+                throw CreateProfileFilePersistenceException(rtssPath, profileName, frameLimit, e);
+            }
+
+            return new LimitSessionSnapshot
+            {
+                GameId = gameId,
+                GameName = gameName,
+                ExecutablePath = executablePath,
+                ProfileName = profileName,
+                AppliedLimit = frameLimit,
+                UsesGlobalProfile = usesGlobalProfile,
+                ProfileExisted = profileExisted,
+                FileFallbackUsed = true,
+                ProfileFilePath = fileSnapshot.Path,
+                OriginalProfileFileExisted = fileSnapshot.Exists,
+                OriginalProfileFileContent = fileSnapshot.Content,
+                StartedAt = DateTime.UtcNow
+            };
         }
 
         public void RestoreLimit(LimitSessionSnapshot snapshot)
@@ -304,72 +256,23 @@ namespace FPSLimiter
 
             EnsureRtssRunning(rtssPath);
 
-            using (var api = new RtssProfileApi(rtssPath))
+            RestoreProfileFile(snapshot);
+            RefreshRtssProfiles(rtssPath);
+            logger.Info($"Restored RTSS profile file {snapshot.ProfileName} after {snapshot.GameName}.");
+        }
+
+        private static string FormatFileReadback(int? value)
+        {
+            return value.HasValue ? value.Value.ToString() : "unavailable";
+        }
+
+        private static void RefreshRtssProfiles(string rtssPath)
+        {
+            using (var refresher = new RtssProfileRefresher(rtssPath))
             {
-                api.Initialize();
-
-                if (snapshot.FileFallbackUsed)
-                {
-                    RestoreProfileFile(snapshot);
-                    api.UpdateProfiles();
-                    logger.Info($"Restored RTSS profile file {snapshot.ProfileName} after {snapshot.GameName}.");
-                    return;
-                }
-
-                var apiProfileName = snapshot.UsesGlobalProfile ? string.Empty : snapshot.ProfileName;
-                if (snapshot.ProfileExisted)
-                {
-                    var limit = snapshot.OriginalLimitAvailable ? snapshot.OriginalLimit : 0;
-                    var properties = new Dictionary<string, int>
-                    {
-                        { FramerateLimitProperty, limit }
-                    };
-
-                    if (snapshot.OriginalAppDetectionLevelAvailable)
-                    {
-                        properties[AppDetectionLevelProperty] = snapshot.OriginalAppDetectionLevel;
-                    }
-
-                    api.SetIntegerProperties(apiProfileName, apiProfileName, properties);
-                }
-                else
-                {
-                    api.DeleteProfile(snapshot.ProfileName);
-                }
-
-                api.UpdateProfiles();
-                if (snapshot.ProfileExisted)
-                {
-                    LogProfileReadback(api, apiProfileName, snapshot.ProfileName, "after restore");
-                }
+                refresher.Initialize();
+                refresher.UpdateProfiles();
             }
-        }
-
-        private static ProfileReadback LogProfileReadback(RtssProfileApi api, string apiProfileName, string displayProfileName, string action)
-        {
-            int limit;
-            var limitAvailable = api.TryGetIntegerProperty(apiProfileName, FramerateLimitProperty, out limit);
-
-            int appDetectionLevel;
-            var appDetectionLevelAvailable = api.TryGetIntegerProperty(apiProfileName, AppDetectionLevelProperty, out appDetectionLevel);
-
-            logger.Info(
-                $"RTSS profile {displayProfileName} {action}: " +
-                $"{FramerateLimitProperty}={FormatReadbackValue(limitAvailable, limit)}, " +
-                $"{AppDetectionLevelProperty}={FormatReadbackValue(appDetectionLevelAvailable, appDetectionLevel)}.");
-
-            return new ProfileReadback
-            {
-                LimitAvailable = limitAvailable,
-                Limit = limit,
-                AppDetectionLevelAvailable = appDetectionLevelAvailable,
-                AppDetectionLevel = appDetectionLevel
-            };
-        }
-
-        private static string FormatReadbackValue(bool available, int value)
-        {
-            return available ? value.ToString() : "unavailable";
         }
 
         private string ResolveRequiredRtssPath()
@@ -396,19 +299,17 @@ namespace FPSLimiter
             }
         }
 
-        private static InvalidOperationException CreateProfilePersistenceException(
+        private static InvalidOperationException CreateProfileFilePersistenceException(
             string rtssPath,
             string profileName,
             int requestedLimit,
-            ProfileReadback readback,
             Exception innerException)
         {
             var profilesDirectory = GetProfilesDirectory(rtssPath);
             var message =
-                $"RTSS did not persist the requested {requestedLimit} FPS limit for profile {profileName}. " +
-                $"RTSS read-back stayed at {FormatReadbackValue(readback.LimitAvailable, readback.Limit)}. " +
+                $"FPS Limiter could not write the requested {requestedLimit} FPS limit to RTSS profile {profileName}. " +
                 $"This usually means Playnite cannot write to the RTSS Profiles folder: {profilesDirectory}. " +
-                "Run Playnite as administrator, grant Modify permission to that folder, or install RTSS in a writable location.";
+                "Use FPS Limiter's RTSS access setup, grant Modify permission to that folder, or install RTSS in a writable location.";
 
             return innerException == null
                 ? new InvalidOperationException(message)
@@ -578,14 +479,6 @@ namespace FPSLimiter
             return null;
         }
 
-        private class ProfileReadback
-        {
-            public bool LimitAvailable { get; set; }
-            public int Limit { get; set; }
-            public bool AppDetectionLevelAvailable { get; set; }
-            public int AppDetectionLevel { get; set; }
-        }
-
         private class ProfileFileSnapshot
         {
             public string Path { get; set; }
@@ -620,19 +513,13 @@ namespace FPSLimiter
             }
         }
 
-        private class RtssProfileApi : IDisposable
+        private class RtssProfileRefresher : IDisposable
         {
             private readonly string rtssPath;
             private IntPtr libraryHandle;
-            private EnumProfilesDelegate enumProfiles;
-            private LoadProfileDelegate loadProfile;
-            private SaveProfileDelegate saveProfile;
-            private GetProfilePropertyDelegate getProfileProperty;
-            private SetProfilePropertyDelegate setProfileProperty;
-            private DeleteProfileDelegate deleteProfile;
             private UpdateProfilesDelegate updateProfiles;
 
-            public RtssProfileApi(string rtssPath)
+            public RtssProfileRefresher(string rtssPath)
             {
                 this.rtssPath = rtssPath;
             }
@@ -659,63 +546,7 @@ namespace FPSLimiter
                     throw new InvalidOperationException($"Could not load {hooksPath}.");
                 }
 
-                enumProfiles = GetExport<EnumProfilesDelegate>("EnumProfiles");
-                loadProfile = GetExport<LoadProfileDelegate>("LoadProfile");
-                saveProfile = GetExport<SaveProfileDelegate>("SaveProfile");
-                getProfileProperty = GetExport<GetProfilePropertyDelegate>("GetProfileProperty");
-                setProfileProperty = GetExport<SetProfilePropertyDelegate>("SetProfileProperty");
-                deleteProfile = GetExport<DeleteProfileDelegate>("DeleteProfile");
                 updateProfiles = GetExport<UpdateProfilesDelegate>("UpdateProfiles");
-            }
-
-            public bool ProfileExists(string profileName)
-            {
-                return EnumerateProfiles()
-                    .Any(a => IsSameProfileName(a, profileName));
-            }
-
-            public bool TryGetFramerateLimit(string sourceProfileName, out int limit)
-            {
-                return TryGetIntegerProperty(sourceProfileName, FramerateLimitProperty, out limit);
-            }
-
-            public bool TryGetIntegerProperty(string sourceProfileName, string propertyName, out int value)
-            {
-                loadProfile(sourceProfileName ?? string.Empty);
-
-                var buffer = new byte[4];
-                var success = getProfileProperty(propertyName, buffer, (uint)buffer.Length);
-                value = success ? BitConverter.ToInt32(buffer, 0) : 0;
-                return success;
-            }
-
-            public void SetFramerateLimit(string sourceProfileName, string saveProfileName, int limit)
-            {
-                SetIntegerProperties(sourceProfileName, saveProfileName, new Dictionary<string, int>
-                {
-                    { FramerateLimitProperty, limit }
-                });
-            }
-
-            public void SetIntegerProperties(string sourceProfileName, string saveProfileName, IDictionary<string, int> properties)
-            {
-                loadProfile(sourceProfileName ?? string.Empty);
-
-                foreach (var property in properties)
-                {
-                    var bytes = BitConverter.GetBytes(property.Value);
-                    if (!setProfileProperty(property.Key, bytes, (uint)bytes.Length))
-                    {
-                        throw new InvalidOperationException($"RTSS rejected the {property.Key} profile update.");
-                    }
-                }
-
-                saveProfile(saveProfileName ?? string.Empty);
-            }
-
-            public void DeleteProfile(string profileName)
-            {
-                deleteProfile(profileName);
             }
 
             public void UpdateProfiles()
@@ -732,36 +563,6 @@ namespace FPSLimiter
                 }
             }
 
-            private IEnumerable<string> EnumerateProfiles()
-            {
-                var buffer = new byte[32768];
-                var size = enumProfiles(buffer, (uint)buffer.Length);
-                var length = Array.IndexOf(buffer, (byte)0);
-                if (length < 0)
-                {
-                    length = size > 0 && size < buffer.Length ? (int)size : buffer.Length;
-                }
-
-                var text = Encoding.ASCII.GetString(buffer, 0, length);
-                return text.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries)
-                    .Select(a => a.Trim())
-                    .Where(a => !string.IsNullOrWhiteSpace(a));
-            }
-
-            private static bool IsSameProfileName(string candidate, string profileName)
-            {
-                if (string.Equals(candidate, profileName, StringComparison.OrdinalIgnoreCase))
-                {
-                    return true;
-                }
-
-                var withoutConfig = candidate.EndsWith(".cfg", StringComparison.OrdinalIgnoreCase)
-                    ? candidate.Substring(0, candidate.Length - 4)
-                    : candidate;
-
-                return string.Equals(withoutConfig, profileName, StringComparison.OrdinalIgnoreCase);
-            }
-
             private T GetExport<T>(string name) where T : class
             {
                 var pointer = GetProcAddress(libraryHandle, name);
@@ -772,26 +573,6 @@ namespace FPSLimiter
 
                 return Marshal.GetDelegateForFunctionPointer(pointer, typeof(T)) as T;
             }
-
-            [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-            private delegate uint EnumProfilesDelegate(byte[] profilesList, uint profilesListSize);
-
-            [UnmanagedFunctionPointer(CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
-            private delegate void LoadProfileDelegate([MarshalAs(UnmanagedType.LPStr)] string profile);
-
-            [UnmanagedFunctionPointer(CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
-            private delegate void SaveProfileDelegate([MarshalAs(UnmanagedType.LPStr)] string profile);
-
-            [UnmanagedFunctionPointer(CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
-            [return: MarshalAs(UnmanagedType.Bool)]
-            private delegate bool GetProfilePropertyDelegate([MarshalAs(UnmanagedType.LPStr)] string propertyName, byte[] propertyData, uint propertySize);
-
-            [UnmanagedFunctionPointer(CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
-            [return: MarshalAs(UnmanagedType.Bool)]
-            private delegate bool SetProfilePropertyDelegate([MarshalAs(UnmanagedType.LPStr)] string propertyName, byte[] propertyData, uint propertySize);
-
-            [UnmanagedFunctionPointer(CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
-            private delegate void DeleteProfileDelegate([MarshalAs(UnmanagedType.LPStr)] string profile);
 
             [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
             private delegate void UpdateProfilesDelegate();

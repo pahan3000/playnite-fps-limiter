@@ -7,12 +7,12 @@
              d:DesignHeight="420"
              d:DesignWidth="640">
     <ScrollViewer VerticalScrollBarVisibility="Auto">
-        <StackPanel Margin="0,0,12,0">
+        <StackPanel Margin="16,16,24,16">
             <TextBlock Text="RTSS executable path"
                        Margin="0,0,0,4" />
             <TextBox Text="{Binding Settings.RtssPath, UpdateSourceTrigger=PropertyChanged}"
                      MinWidth="420" />
-            <TextBlock Text="Leave blank to auto-detect RTSS.exe."
+            <TextBlock Text="FPS Limiter fills this with the detected RTSS.exe path when it can. Clear it to let detection run again."
                        TextWrapping="Wrap"
                        Opacity="0.72"
                        Margin="0,4,0,16" />
@@ -27,12 +27,9 @@
             <TextBlock Text="This is more reliable when per-executable RTSS profiles do not apply. The previous Global cap is restored when Playnite detects the game stopped."
                        TextWrapping="Wrap"
                        Opacity="0.72"
-                       Margin="0,0,0,8" />
+                       Margin="0,0,0,12" />
 
-            <CheckBox Content="Try direct RTSS profile file edits if the SDK save does not stick"
-                      IsChecked="{Binding Settings.EnableProfileFileFallback}"
-                      Margin="0,0,0,4" />
-            <TextBlock Text="Requires Playnite to have write access to the RTSS Profiles folder, for example by running Playnite elevated or changing that folder's permissions."
+            <TextBlock Text="FPS Limiter edits RTSS profile files directly. Normal, non-admin Playnite needs write access to the RTSS Profiles folder."
                        TextWrapping="Wrap"
                        Opacity="0.72"
                        Margin="0,0,0,8" />
@@ -52,12 +49,7 @@
                        Margin="0,0,0,4" />
             <TextBox Text="{Binding Settings.PresetsText, UpdateSourceTrigger=PropertyChanged}"
                      MinWidth="420" />
-            <TextBlock Text="Use comma-separated values. These presets appear in Desktop game menus and Fullscreen Extensions."
-                       TextWrapping="Wrap"
-                       Opacity="0.72"
-                       Margin="0,4,0,16" />
-
-            <TextBlock Text="Desktop mode also supports custom typed caps and manual target executable selection from each game's context menu."
+            <TextBlock Text="Use comma-separated values. Spaces and trailing commas are fine; values are saved in a clean format."
                        TextWrapping="Wrap"
                        Opacity="0.72" />
         </StackPanel>
