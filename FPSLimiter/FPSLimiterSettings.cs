@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Windows;
 
 namespace FPSLimiter
 {
@@ -148,8 +149,12 @@ namespace FPSLimiter
     public class FPSLimiterSettingsViewModel : ObservableObject, ISettings
     {
         private readonly FPSLimiter plugin;
+        private readonly IPlayniteAPI playniteApi;
         private FPSLimiterSettings editingClone;
         private FPSLimiterSettings settings;
+
+        public RelayCommand TestRtssProfilePermissionsCommand { get; private set; }
+        public RelayCommand FixRtssProfilePermissionsCommand { get; private set; }
 
         public FPSLimiterSettings Settings
         {
@@ -161,12 +166,16 @@ namespace FPSLimiter
             }
         }
 
-        public FPSLimiterSettingsViewModel(FPSLimiter plugin)
+        public FPSLimiterSettingsViewModel(FPSLimiter plugin, IPlayniteAPI playniteApi)
         {
             this.plugin = plugin;
+            this.playniteApi = playniteApi;
 
             var savedSettings = plugin.LoadPluginSettings<FPSLimiterSettings>();
             Settings = savedSettings ?? new FPSLimiterSettings();
+
+            TestRtssProfilePermissionsCommand = new RelayCommand(TestRtssProfilePermissions);
+            FixRtssProfilePermissionsCommand = new RelayCommand(FixRtssProfilePermissions);
         }
 
         public void SaveSettings()
@@ -222,6 +231,78 @@ namespace FPSLimiter
         {
             Settings.PresetsText = string.Join(", ", Settings.GetPresetValues());
             Settings.RtssPath = Settings.RtssPath?.Trim() ?? string.Empty;
+        }
+
+        private void TestRtssProfilePermissions()
+        {
+            try
+            {
+                NormalizeSettings();
+                var backend = new RtssLimiterBackend(Settings);
+                var result = backend.TestProfileWriteAccess();
+
+                if (result.Success)
+                {
+                    playniteApi.Dialogs.ShowMessage(
+                        $"FPS Limiter can write to the RTSS Profiles folder.\n\n{result.ProfilesDirectory}",
+                        "FPS Limiter");
+                }
+                else
+                {
+                    playniteApi.Dialogs.ShowErrorMessage(
+                        $"FPS Limiter cannot write to the RTSS Profiles folder yet.\n\n{result.Message}",
+                        "FPS Limiter");
+                }
+            }
+            catch (Exception e)
+            {
+                playniteApi.Dialogs.ShowErrorMessage(
+                    $"FPS Limiter could not test RTSS profile access.\n\n{e.Message}",
+                    "FPS Limiter");
+            }
+        }
+
+        private void FixRtssProfilePermissions()
+        {
+            try
+            {
+                NormalizeSettings();
+                var backend = new RtssLimiterBackend(Settings);
+                var profilesDirectory = backend.ResolveProfilesDirectory();
+
+                var response = playniteApi.Dialogs.ShowMessage(
+                    $"FPS Limiter will request administrator approval once, then grant your current Windows user Modify access to this RTSS folder only:\n\n{profilesDirectory}\n\nContinue?",
+                    "FPS Limiter",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Question);
+
+                if (response != MessageBoxResult.Yes)
+                {
+                    return;
+                }
+
+                backend.GrantProfilesModifyPermissionToCurrentUser();
+                var result = backend.TestProfileWriteAccess();
+
+                if (result.Success)
+                {
+                    playniteApi.Dialogs.ShowMessage(
+                        $"RTSS profile permissions are ready.\n\n{result.ProfilesDirectory}",
+                        "FPS Limiter");
+                }
+                else
+                {
+                    playniteApi.Dialogs.ShowErrorMessage(
+                        $"The permission command completed, but the write test still failed.\n\n{result.Message}",
+                        "FPS Limiter");
+                }
+            }
+            catch (Exception e)
+            {
+                playniteApi.Dialogs.ShowErrorMessage(
+                    $"FPS Limiter could not fix RTSS profile permissions.\n\n{e.Message}",
+                    "FPS Limiter");
+            }
         }
     }
 }

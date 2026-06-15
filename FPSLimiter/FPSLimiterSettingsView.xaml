@@ -35,7 +35,18 @@
             <TextBlock Text="Requires Playnite to have write access to the RTSS Profiles folder, for example by running Playnite elevated or changing that folder's permissions."
                        TextWrapping="Wrap"
                        Opacity="0.72"
-                       Margin="0,0,0,16" />
+                       Margin="0,0,0,8" />
+
+            <StackPanel Orientation="Horizontal"
+                        Margin="0,0,0,16">
+                <Button Content="Test RTSS profile access"
+                        Command="{Binding TestRtssProfilePermissionsCommand}"
+                        MinWidth="160"
+                        Margin="0,0,8,0" />
+                <Button Content="Fix RTSS profile permissions..."
+                        Command="{Binding FixRtssProfilePermissionsCommand}"
+                        MinWidth="180" />
+            </StackPanel>
 
             <TextBlock Text="FPS presets"
                        Margin="0,0,0,4" />

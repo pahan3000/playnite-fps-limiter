@@ -1,10 +1,12 @@
 using Playnite.SDK;
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Security.Principal;
 using System.Text;
 using System.Threading;
 
@@ -60,6 +62,109 @@ namespace FPSLimiter
             }
 
             return null;
+        }
+
+        public string ResolveProfilesDirectory()
+        {
+            var rtssPath = ResolveRequiredRtssPath();
+            var profilesDirectory = GetProfilesDirectory(rtssPath);
+            if (!Directory.Exists(profilesDirectory))
+            {
+                throw new DirectoryNotFoundException($"RTSS Profiles folder was not found: {profilesDirectory}");
+            }
+
+            return profilesDirectory;
+        }
+
+        public RtssProfilePermissionTestResult TestProfileWriteAccess()
+        {
+            string testPath = null;
+
+            try
+            {
+                var rtssPath = ResolveRequiredRtssPath();
+                var profilesDirectory = GetProfilesDirectory(rtssPath);
+                if (!Directory.Exists(profilesDirectory))
+                {
+                    return RtssProfilePermissionTestResult.Fail(profilesDirectory, $"RTSS Profiles folder was not found: {profilesDirectory}");
+                }
+
+                testPath = Path.Combine(profilesDirectory, $"FPSLimiterPermissionTest_{Guid.NewGuid():N}.tmp");
+                File.WriteAllText(testPath, "fps-limiter permission test", Encoding.ASCII);
+                var readback = File.ReadAllText(testPath, Encoding.ASCII);
+                File.Delete(testPath);
+                testPath = null;
+
+                if (!string.Equals(readback, "fps-limiter permission test", StringComparison.Ordinal))
+                {
+                    return RtssProfilePermissionTestResult.Fail(profilesDirectory, "Temporary file read-back did not match.");
+                }
+
+                var globalPath = GetProfileFilePath(rtssPath, string.Empty);
+                var globalText = File.ReadAllText(globalPath, Encoding.Default);
+                File.WriteAllText(globalPath, globalText, Encoding.Default);
+
+                return RtssProfilePermissionTestResult.Ok(profilesDirectory);
+            }
+            catch (Exception e)
+            {
+                var profilesDirectory = SafeGetProfilesDirectory();
+                return RtssProfilePermissionTestResult.Fail(profilesDirectory, e.Message);
+            }
+            finally
+            {
+                if (!string.IsNullOrWhiteSpace(testPath) && File.Exists(testPath))
+                {
+                    try
+                    {
+                        File.Delete(testPath);
+                    }
+                    catch
+                    {
+                    }
+                }
+            }
+        }
+
+        public void GrantProfilesModifyPermissionToCurrentUser()
+        {
+            var profilesDirectory = ResolveProfilesDirectory();
+            var identity = WindowsIdentity.GetCurrent();
+            var sid = identity?.User?.Value;
+            if (string.IsNullOrWhiteSpace(sid))
+            {
+                throw new InvalidOperationException("Could not resolve the current Windows user SID.");
+            }
+
+            var arguments = $"\"{profilesDirectory}\" /grant *{sid}:(OI)(CI)M /T /C";
+            var icaclsPath = Path.Combine(Environment.SystemDirectory, "icacls.exe");
+            try
+            {
+                using (var process = Process.Start(new ProcessStartInfo
+                {
+                    FileName = icaclsPath,
+                    Arguments = arguments,
+                    UseShellExecute = true,
+                    Verb = "runas",
+                    WindowStyle = ProcessWindowStyle.Hidden
+                }))
+                {
+                    if (process == null)
+                    {
+                        throw new InvalidOperationException("Windows did not start the elevated permission command.");
+                    }
+
+                    process.WaitForExit();
+                    if (process.ExitCode != 0)
+                    {
+                        throw new InvalidOperationException($"The elevated permission command exited with code {process.ExitCode}.");
+                    }
+                }
+            }
+            catch (Win32Exception e) when (e.NativeErrorCode == 1223)
+            {
+                throw new InvalidOperationException("Administrator approval was cancelled.", e);
+            }
         }
 
         public void EnsureRtssRunning(string rtssPath)
@@ -267,6 +372,30 @@ namespace FPSLimiter
             return available ? value.ToString() : "unavailable";
         }
 
+        private string ResolveRequiredRtssPath()
+        {
+            var rtssPath = ResolveRtssPath();
+            if (string.IsNullOrWhiteSpace(rtssPath))
+            {
+                throw new InvalidOperationException("RTSS.exe was not found. Set the RTSS path in FPS Limiter settings.");
+            }
+
+            return rtssPath;
+        }
+
+        private string SafeGetProfilesDirectory()
+        {
+            try
+            {
+                var rtssPath = ResolveRtssPath();
+                return string.IsNullOrWhiteSpace(rtssPath) ? null : GetProfilesDirectory(rtssPath);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
         private static InvalidOperationException CreateProfilePersistenceException(
             string rtssPath,
             string profileName,
@@ -462,6 +591,33 @@ namespace FPSLimiter
             public string Path { get; set; }
             public bool Exists { get; set; }
             public string Content { get; set; }
+        }
+
+        public class RtssProfilePermissionTestResult
+        {
+            public bool Success { get; private set; }
+            public string ProfilesDirectory { get; private set; }
+            public string Message { get; private set; }
+
+            public static RtssProfilePermissionTestResult Ok(string profilesDirectory)
+            {
+                return new RtssProfilePermissionTestResult
+                {
+                    Success = true,
+                    ProfilesDirectory = profilesDirectory,
+                    Message = "OK"
+                };
+            }
+
+            public static RtssProfilePermissionTestResult Fail(string profilesDirectory, string message)
+            {
+                return new RtssProfilePermissionTestResult
+                {
+                    Success = false,
+                    ProfilesDirectory = profilesDirectory,
+                    Message = message
+                };
+            }
         }
 
         private class RtssProfileApi : IDisposable

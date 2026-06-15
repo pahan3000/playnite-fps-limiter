@@ -22,7 +22,7 @@ namespace FPSLimiter
 
         public FPSLimiter(IPlayniteAPI api) : base(api)
         {
-            settings = new FPSLimiterSettingsViewModel(this);
+            settings = new FPSLimiterSettingsViewModel(this, api);
             limiterService = new LimiterService(api, settings);
 
             Properties = new GenericPluginProperties
