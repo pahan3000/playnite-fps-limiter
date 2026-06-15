@@ -40,7 +40,7 @@
                         Command="{Binding TestRtssProfilePermissionsCommand}"
                         MinWidth="160"
                         Margin="0,0,8,0" />
-                <Button Content="Fix RTSS profile permissions..."
+                <Button Content="Set up RTSS access..."
                         Command="{Binding FixRtssProfilePermissionsCommand}"
                         MinWidth="180" />
             </StackPanel>
