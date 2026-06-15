@@ -77,17 +77,21 @@ namespace FPSLimiter
             }
         }
 
-        public string ResolveProcessTreeTarget(int? startedProcessId, string currentExecutablePath, string gameName, int waitMilliseconds = 12000)
+        public string ResolveLaunchedGameProcessTarget(Game game, int? startedProcessId, string currentExecutablePath, int waitMilliseconds = 18000)
         {
-            if (!startedProcessId.HasValue || startedProcessId.Value <= 0)
-            {
-                return null;
-            }
-
             var deadline = DateTime.UtcNow.AddMilliseconds(waitMilliseconds);
             while (DateTime.UtcNow <= deadline)
             {
-                var candidate = GetBestDescendantExecutable(startedProcessId.Value, currentExecutablePath, gameName);
+                var candidate = startedProcessId.HasValue && startedProcessId.Value > 0
+                    ? GetBestDescendantExecutable(startedProcessId.Value, currentExecutablePath, game.Name)
+                    : null;
+
+                if (IsValidExecutable(candidate))
+                {
+                    return candidate;
+                }
+
+                candidate = GetBestInstallDirectoryExecutable(game, currentExecutablePath);
                 if (IsValidExecutable(candidate))
                 {
                     return candidate;
@@ -136,6 +140,59 @@ namespace FPSLimiter
             catch (Exception e)
             {
                 logger.Debug(e, $"Could not inspect child processes for PID {rootProcessId}.");
+                return null;
+            }
+        }
+
+        private string GetBestInstallDirectoryExecutable(Game game, string currentExecutablePath)
+        {
+            try
+            {
+                var installRoot = ResolveInstallRoot(game, currentExecutablePath);
+                var processes = QueryProcesses()
+                    .Where(a => IsValidExecutable(a.ExecutablePath))
+                    .ToList();
+
+                if (!string.IsNullOrWhiteSpace(installRoot))
+                {
+                    processes = processes
+                        .Where(a => IsUnderDirectory(a.ExecutablePath, installRoot))
+                        .ToList();
+                }
+                else
+                {
+                    var words = GetSignificantWords(game?.Name).ToList();
+                    processes = processes
+                        .Where(a => words.Any(word =>
+                            a.ExecutablePath.IndexOf(word, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                            Path.GetFileName(a.ExecutablePath).IndexOf(word, StringComparison.OrdinalIgnoreCase) >= 0))
+                        .ToList();
+                }
+
+                if (!processes.Any())
+                {
+                    return null;
+                }
+
+                var currentFile = string.IsNullOrWhiteSpace(currentExecutablePath)
+                    ? null
+                    : Path.GetFileName(currentExecutablePath);
+
+                var best = processes
+                    .OrderByDescending(a => ScoreProcess(a, currentFile, game?.Name))
+                    .ThenByDescending(a => a.ProcessId)
+                    .FirstOrDefault();
+
+                if (best != null)
+                {
+                    logger.Debug($"FPS Limiter install-folder target candidate for {game?.Name}: PID={best.ProcessId}, EXE={best.ExecutablePath}.");
+                }
+
+                return best?.ExecutablePath;
+            }
+            catch (Exception e)
+            {
+                logger.Debug(e, $"Could not inspect running processes for {game?.Name}.");
                 return null;
             }
         }
@@ -229,6 +286,35 @@ namespace FPSLimiter
             }
 
             return score;
+        }
+
+        private static string ResolveInstallRoot(Game game, string currentExecutablePath)
+        {
+            if (!string.IsNullOrWhiteSpace(game?.InstallDirectory) && Directory.Exists(game.InstallDirectory))
+            {
+                return Path.GetFullPath(game.InstallDirectory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            }
+
+            if (!string.IsNullOrWhiteSpace(currentExecutablePath) && File.Exists(currentExecutablePath))
+            {
+                return Path.GetDirectoryName(Path.GetFullPath(currentExecutablePath));
+            }
+
+            return null;
+        }
+
+        private static bool IsUnderDirectory(string path, string directory)
+        {
+            if (string.IsNullOrWhiteSpace(path) || string.IsNullOrWhiteSpace(directory))
+            {
+                return false;
+            }
+
+            var fullPath = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var fullDirectory = Path.GetFullPath(directory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+            return fullPath.StartsWith(fullDirectory + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(fullPath, fullDirectory, StringComparison.OrdinalIgnoreCase);
         }
 
         private static bool HasMainWindow(int processId)

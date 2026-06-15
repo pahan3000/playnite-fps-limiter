@@ -150,11 +150,11 @@ namespace FPSLimiter
 
             var currentSession = Settings.ActiveSessions.FirstOrDefault(a => a.GameId == game.Id);
             var currentExecutable = currentSession?.ExecutablePath ?? profile.LastResolvedExecutable;
-            var actualTarget = targetResolver.ResolveProcessTreeTarget(startedProcessId, currentExecutable, game.Name);
+            var actualTarget = targetResolver.ResolveLaunchedGameProcessTarget(game, startedProcessId, currentExecutable);
 
             if (string.IsNullOrWhiteSpace(actualTarget))
             {
-                logger.Debug($"FPS Limiter did not find a child process target for {game.Name} from PID {startedProcessId}.");
+                logger.Debug($"FPS Limiter did not find a better running process target for {game.Name} from PID {startedProcessId} or install folder.");
                 return;
             }
 
