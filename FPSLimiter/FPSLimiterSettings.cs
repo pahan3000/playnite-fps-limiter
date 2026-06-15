@@ -121,6 +121,8 @@ namespace FPSLimiter
         public bool ProfileExisted { get; set; }
         public bool OriginalLimitAvailable { get; set; }
         public int OriginalLimit { get; set; }
+        public bool OriginalAppDetectionLevelAvailable { get; set; }
+        public int OriginalAppDetectionLevel { get; set; }
         public DateTime StartedAt { get; set; }
     }
 

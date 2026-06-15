@@ -12,7 +12,9 @@ namespace FPSLimiter
 {
     public class RtssLimiterBackend
     {
+        private const string AppDetectionLevelProperty = "AppDetectionLevel";
         private const string FramerateLimitProperty = "FramerateLimit";
+        private const int ActiveAppDetectionLevel = 3;
         private static readonly ILogger logger = LogManager.GetLogger();
 
         private readonly FPSLimiterSettings settings;
@@ -106,11 +108,31 @@ namespace FPSLimiter
                 api.Initialize();
 
                 var profileExisted = api.ProfileExists(profileName);
-                int originalLimit;
-                var originalLimitAvailable = api.TryGetFramerateLimit(profileExisted ? profileName : string.Empty, out originalLimit);
+                var sourceProfileName = profileExisted ? profileName : string.Empty;
 
-                api.SetFramerateLimit(profileExisted ? profileName : string.Empty, profileName, frameLimit);
+                int originalLimit;
+                var originalLimitAvailable = api.TryGetIntegerProperty(sourceProfileName, FramerateLimitProperty, out originalLimit);
+
+                int originalAppDetectionLevel;
+                var originalAppDetectionLevelAvailable = api.TryGetIntegerProperty(sourceProfileName, AppDetectionLevelProperty, out originalAppDetectionLevel);
+
+                var properties = new Dictionary<string, int>
+                {
+                    { FramerateLimitProperty, frameLimit }
+                };
+
+                if (!profileExisted || originalAppDetectionLevelAvailable)
+                {
+                    properties[AppDetectionLevelProperty] = ActiveAppDetectionLevel;
+                }
+                else
+                {
+                    logger.Warn($"RTSS did not return {AppDetectionLevelProperty} for existing profile {profileName}; leaving detection level unchanged.");
+                }
+
+                api.SetIntegerProperties(sourceProfileName, profileName, properties);
                 api.UpdateProfiles();
+                LogProfileReadback(api, profileName, "after apply");
 
                 return new LimitSessionSnapshot
                 {
@@ -122,6 +144,8 @@ namespace FPSLimiter
                     ProfileExisted = profileExisted,
                     OriginalLimitAvailable = originalLimitAvailable,
                     OriginalLimit = originalLimitAvailable ? originalLimit : 0,
+                    OriginalAppDetectionLevelAvailable = originalAppDetectionLevelAvailable,
+                    OriginalAppDetectionLevel = originalAppDetectionLevelAvailable ? originalAppDetectionLevel : 0,
                     StartedAt = DateTime.UtcNow
                 };
             }
@@ -144,7 +168,17 @@ namespace FPSLimiter
                 if (snapshot.ProfileExisted)
                 {
                     var limit = snapshot.OriginalLimitAvailable ? snapshot.OriginalLimit : 0;
-                    api.SetFramerateLimit(snapshot.ProfileName, snapshot.ProfileName, limit);
+                    var properties = new Dictionary<string, int>
+                    {
+                        { FramerateLimitProperty, limit }
+                    };
+
+                    if (snapshot.OriginalAppDetectionLevelAvailable)
+                    {
+                        properties[AppDetectionLevelProperty] = snapshot.OriginalAppDetectionLevel;
+                    }
+
+                    api.SetIntegerProperties(snapshot.ProfileName, snapshot.ProfileName, properties);
                 }
                 else
                 {
@@ -152,7 +186,30 @@ namespace FPSLimiter
                 }
 
                 api.UpdateProfiles();
+                if (snapshot.ProfileExisted)
+                {
+                    LogProfileReadback(api, snapshot.ProfileName, "after restore");
+                }
             }
+        }
+
+        private static void LogProfileReadback(RtssProfileApi api, string profileName, string action)
+        {
+            int limit;
+            var limitAvailable = api.TryGetIntegerProperty(profileName, FramerateLimitProperty, out limit);
+
+            int appDetectionLevel;
+            var appDetectionLevelAvailable = api.TryGetIntegerProperty(profileName, AppDetectionLevelProperty, out appDetectionLevel);
+
+            logger.Info(
+                $"RTSS profile {profileName} {action}: " +
+                $"{FramerateLimitProperty}={FormatReadbackValue(limitAvailable, limit)}, " +
+                $"{AppDetectionLevelProperty}={FormatReadbackValue(appDetectionLevelAvailable, appDetectionLevel)}.");
+        }
+
+        private static string FormatReadbackValue(bool available, int value)
+        {
+            return available ? value.ToString() : "unavailable";
         }
 
         private class RtssProfileApi : IDisposable
@@ -211,22 +268,38 @@ namespace FPSLimiter
 
             public bool TryGetFramerateLimit(string sourceProfileName, out int limit)
             {
+                return TryGetIntegerProperty(sourceProfileName, FramerateLimitProperty, out limit);
+            }
+
+            public bool TryGetIntegerProperty(string sourceProfileName, string propertyName, out int value)
+            {
                 loadProfile(sourceProfileName ?? string.Empty);
 
                 var buffer = new byte[4];
-                var success = getProfileProperty(FramerateLimitProperty, buffer, (uint)buffer.Length);
-                limit = success ? BitConverter.ToInt32(buffer, 0) : 0;
+                var success = getProfileProperty(propertyName, buffer, (uint)buffer.Length);
+                value = success ? BitConverter.ToInt32(buffer, 0) : 0;
                 return success;
             }
 
             public void SetFramerateLimit(string sourceProfileName, string saveProfileName, int limit)
             {
+                SetIntegerProperties(sourceProfileName, saveProfileName, new Dictionary<string, int>
+                {
+                    { FramerateLimitProperty, limit }
+                });
+            }
+
+            public void SetIntegerProperties(string sourceProfileName, string saveProfileName, IDictionary<string, int> properties)
+            {
                 loadProfile(sourceProfileName ?? string.Empty);
 
-                var bytes = BitConverter.GetBytes(limit);
-                if (!setProfileProperty(FramerateLimitProperty, bytes, (uint)bytes.Length))
+                foreach (var property in properties)
                 {
-                    throw new InvalidOperationException("RTSS rejected the FramerateLimit profile update.");
+                    var bytes = BitConverter.GetBytes(property.Value);
+                    if (!setProfileProperty(property.Key, bytes, (uint)bytes.Length))
+                    {
+                        throw new InvalidOperationException($"RTSS rejected the {property.Key} profile update.");
+                    }
                 }
 
                 saveProfile(saveProfileName ?? string.Empty);
