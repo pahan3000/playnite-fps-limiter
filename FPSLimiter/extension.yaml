@@ -1,7 +1,7 @@
 ﻿Id: FPSLimiter_4b308964-9a0d-4775-b7c2-78b92af4d7b6
 Name: FPS Limiter
 Author: mjd4219
-Version: 0.1.0
+Version: 0.1.1
 Module: FPSLimiter.dll
 Type: GenericPlugin
 Icon: icon.png

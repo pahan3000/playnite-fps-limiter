@@ -6,6 +6,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using System.Windows.Controls;
 
 namespace FPSLimiter
@@ -51,6 +52,7 @@ namespace FPSLimiter
         public override void OnGameStarted(OnGameStartedEventArgs args)
         {
             limiterService.TryApplyForGame(args.Game, args.SourceAction, args.StartedProcessId, false);
+            Task.Run(() => limiterService.RetargetAfterLaunch(args.Game, args.SourceAction, args.StartedProcessId));
         }
 
         public override void OnGameStartupCancelled(OnGameStartupCancelledEventArgs args)

@@ -140,6 +140,54 @@ namespace FPSLimiter
             }
         }
 
+        public void RetargetAfterLaunch(Game game, GameAction sourceAction, int? startedProcessId)
+        {
+            var profile = Settings.GetGameProfile(game.Id);
+            if (profile == null || !profile.Enabled || profile.FrameLimit <= 0)
+            {
+                return;
+            }
+
+            var currentSession = Settings.ActiveSessions.FirstOrDefault(a => a.GameId == game.Id);
+            var currentExecutable = currentSession?.ExecutablePath ?? profile.LastResolvedExecutable;
+            var actualTarget = targetResolver.ResolveProcessTreeTarget(startedProcessId, currentExecutable, game.Name);
+
+            if (string.IsNullOrWhiteSpace(actualTarget))
+            {
+                logger.Debug($"FPS Limiter did not find a child process target for {game.Name} from PID {startedProcessId}.");
+                return;
+            }
+
+            if (string.Equals(
+                Path.GetFileName(actualTarget),
+                Path.GetFileName(currentExecutable),
+                StringComparison.OrdinalIgnoreCase))
+            {
+                logger.Debug($"FPS Limiter child process target for {game.Name} still resolves to {Path.GetFileName(actualTarget)}.");
+                return;
+            }
+
+            try
+            {
+                if (currentSession != null)
+                {
+                    RestoreSession(currentSession, false);
+                }
+
+                var session = rtssBackend.ApplyLimit(game.Id, game.Name, actualTarget, profile.FrameLimit);
+                Settings.ActiveSessions.RemoveAll(a => a.GameId == game.Id);
+                Settings.ActiveSessions.Add(session);
+                profile.LastResolvedExecutable = actualTarget;
+                settingsViewModel.SaveSettings();
+
+                logger.Info($"Retargeted {game.Name} FPS limit from {Path.GetFileName(currentExecutable)} to {session.ProfileName}.");
+            }
+            catch (Exception e)
+            {
+                logger.Error(e, $"Failed to retarget FPS limit for {game.Name} to {actualTarget}.");
+            }
+        }
+
         public void RestoreActiveSession(Game game, bool showError)
         {
             var snapshot = Settings.ActiveSessions.FirstOrDefault(a => a.GameId == game.Id);
