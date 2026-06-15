@@ -1,0 +1,7 @@
+FPSLimiter/bin/
+FPSLimiter/obj/
+FPSLimiter/.vs/
+FPSLimiter/packages/
+*.pext
+*.user
+*.suo

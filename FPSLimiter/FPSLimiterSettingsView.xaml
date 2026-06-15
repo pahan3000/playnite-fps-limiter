@@ -1,0 +1,38 @@
+<UserControl x:Class="FPSLimiter.FPSLimiterSettingsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             mc:Ignorable="d"
+             d:DesignHeight="420"
+             d:DesignWidth="640">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="0,0,12,0">
+            <TextBlock Text="RTSS executable path"
+                       Margin="0,0,0,4" />
+            <TextBox Text="{Binding Settings.RtssPath, UpdateSourceTrigger=PropertyChanged}"
+                     MinWidth="420" />
+            <TextBlock Text="Leave blank to auto-detect RTSS.exe."
+                       TextWrapping="Wrap"
+                       Opacity="0.72"
+                       Margin="0,4,0,16" />
+
+            <CheckBox Content="Start RTSS automatically when applying a cap"
+                      IsChecked="{Binding Settings.AutoStartRtss}"
+                      Margin="0,0,0,16" />
+
+            <TextBlock Text="FPS presets"
+                       Margin="0,0,0,4" />
+            <TextBox Text="{Binding Settings.PresetsText, UpdateSourceTrigger=PropertyChanged}"
+                     MinWidth="420" />
+            <TextBlock Text="Use comma-separated values. These presets appear in Desktop game menus and Fullscreen Extensions."
+                       TextWrapping="Wrap"
+                       Opacity="0.72"
+                       Margin="0,4,0,16" />
+
+            <TextBlock Text="Desktop mode also supports custom typed caps and manual target executable selection from each game's context menu."
+                       TextWrapping="Wrap"
+                       Opacity="0.72" />
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>
