@@ -1,0 +1,12 @@
+AddonId: FPSLimiter_4b308964-9a0d-4775-b7c2-78b92af4d7b6
+Packages:
+  - Version: 1.0.0
+    RequiredApiVersion: 6.16.0
+    ReleaseDate: 2026-06-15
+    PackageUrl: https://github.com/mjd4219/playnite-fps-limiter/releases/download/v1.0.0/FPSLimiter_4b308964-9a0d-4775-b7c2-78b92af4d7b6_1_0_0.pext
+    Changelog:
+      - Initial public release
+      - Set per-game FPS caps from Desktop and Fullscreen menus
+      - Added RTSS profile file integration with one-time access setup
+      - Added configurable presets, custom caps, and desktop manual target executable selection
+      - Restores previous RTSS profile state when the game stops

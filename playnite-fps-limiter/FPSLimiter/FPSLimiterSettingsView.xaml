@@ -1,0 +1,167 @@
+<UserControl x:Class="FPSLimiter.FPSLimiterSettingsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             mc:Ignorable="d"
+             d:DesignHeight="420"
+             d:DesignWidth="640">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="16,16,24,16">
+            <TextBlock Text="RTSS executable path"
+                       Margin="0,0,0,4" />
+            <TextBox Text="{Binding Settings.RtssPath, UpdateSourceTrigger=PropertyChanged}"
+                     MinWidth="420" />
+            <TextBlock Text="FPS Limiter fills this with the detected RTSS.exe path when it can. Clear it to let detection run again."
+                       TextWrapping="Wrap"
+                       Opacity="0.72"
+                       Margin="0,4,0,16" />
+
+            <CheckBox Content="Start RTSS automatically when applying a cap"
+                      IsChecked="{Binding Settings.AutoStartRtss}"
+                      Margin="0,0,0,8" />
+
+            <CheckBox Content="Use RTSS Global profile while capped games are running"
+                      IsChecked="{Binding Settings.UseGlobalProfileDuringLaunch}"
+                      Margin="0,0,0,4" />
+            <TextBlock Text="This is more reliable when per-executable RTSS profiles do not apply. The previous Global cap is restored when Playnite detects the game stopped."
+                       TextWrapping="Wrap"
+                       Opacity="0.72"
+                       Margin="0,0,0,12" />
+
+            <TextBlock Text="FPS Limiter edits RTSS profile files directly. Normal, non-admin Playnite needs write access to the RTSS Profiles folder."
+                       TextWrapping="Wrap"
+                       Opacity="0.72"
+                       Margin="0,0,0,8" />
+
+            <StackPanel Orientation="Horizontal"
+                        Margin="0,0,0,16">
+                <Button Content="Test RTSS profile access"
+                        Command="{Binding TestRtssProfilePermissionsCommand}"
+                        MinWidth="160"
+                        Margin="0,0,8,0" />
+                <Button Content="Set up RTSS access..."
+                        Command="{Binding FixRtssProfilePermissionsCommand}"
+                        MinWidth="180" />
+            </StackPanel>
+
+            <TextBlock Text="FPS presets"
+                       Margin="0,0,0,4" />
+            <TextBox Text="{Binding Settings.PresetsText, UpdateSourceTrigger=PropertyChanged}"
+                     MinWidth="420" />
+            <TextBlock Text="Use comma-separated values. Decimals are supported (e.g. 59.9, 23.976) for displays without VRR that need an exact fractional cap. Spaces and trailing commas are fine; values are saved in a clean format."
+                       TextWrapping="Wrap"
+                       Opacity="0.72"
+                       Margin="0,0,0,16" />
+
+            <TextBlock Text="Desktop and Fullscreen limits are separate"
+                       FontWeight="Bold"
+                       Margin="0,0,0,4" />
+            <TextBlock TextWrapping="Wrap"
+                       Opacity="0.72"
+                       Margin="0,0,0,16">
+                <Run Text="FPS Limiter now remembers a different cap, sync mode, and global fallback for Playnite's Desktop mode and Fullscreen mode. Whichever mode you're currently using is the one you're editing when you open a game's right-click menu or" />
+                <Run Text=" Extensions &gt; FPS Limiter &gt; Global FPS limit" FontWeight="SemiBold" />
+                <Run Text=". The menu heading shows which mode you're in, e.g. " />
+                <Run Text="FPS Limiter (Fullscreen)" FontWeight="SemiBold" />
+                <Run Text=". Set your TV/no-VRR cap while running Fullscreen mode and your monitor cap while running Desktop mode; they won't overwrite each other." />
+            </TextBlock>
+
+            <TextBlock Text="Global FPS limit and sync mode"
+                       FontWeight="Bold"
+                       Margin="0,0,0,4" />
+            <TextBlock TextWrapping="Wrap"
+                       Opacity="0.72">
+                <Run Text="A fallback cap for games that don't have their own preset is available from Playnite's main menu under" />
+                <Run Text=" Extensions &gt; FPS Limiter &gt; Global FPS limit" FontWeight="SemiBold" />
+                <Run Text=". It's only written to RTSS and only starts RTSS while a game using that fallback is running, and RTSS is closed again once no FPS Limiter caps are active. Each game's right-click menu also has a" />
+                <Run Text=" Sync mode" FontWeight="SemiBold" />
+                <Run Text=" submenu (Async / Front Edge Sync / Back Edge Sync), and the global fallback has its own sync mode submenu next to it." />
+            </TextBlock>
+
+            <Separator Margin="0,16,0,16" />
+
+            <TextBlock Text="VRR refresh rate switching"
+                       FontWeight="Bold"
+                       Margin="0,0,0,4" />
+            <TextBlock TextWrapping="Wrap"
+                       Opacity="0.72"
+                       Margin="0,0,0,8">
+                <Run Text="Automatically changes the display refresh rate when an FPS cap at or below the threshold is applied, then restores the original rate when the game stops. Useful on laptops where VRR works better at a specific refresh rate (e.g. 48 Hz with a 40 FPS cap)." />
+            </TextBlock>
+
+            <CheckBox Content="Switch refresh rate for low FPS caps"
+                      IsChecked="{Binding Settings.VrrRefreshRateEnabled}"
+                      Margin="0,0,0,10" />
+
+            <Grid Margin="0,0,0,4">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="80" />
+                    <ColumnDefinition Width="16" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="80" />
+                </Grid.ColumnDefinitions>
+
+                <TextBlock Grid.Column="0" Text="Target refresh rate (Hz)"
+                           VerticalAlignment="Center"
+                           Margin="0,0,8,0" />
+                <TextBox Grid.Column="1"
+                         Text="{Binding Settings.VrrTargetHz, UpdateSourceTrigger=PropertyChanged}"
+                         IsEnabled="{Binding Settings.VrrRefreshRateEnabled}" />
+
+                <TextBlock Grid.Column="3" Text="FPS cap threshold"
+                           VerticalAlignment="Center"
+                           Margin="0,0,8,0" />
+                <TextBox Grid.Column="4"
+                         Text="{Binding Settings.VrrFpsThreshold, UpdateSourceTrigger=PropertyChanged}"
+                         IsEnabled="{Binding Settings.VrrRefreshRateEnabled}" />
+            </Grid>
+            <TextBlock TextWrapping="Wrap"
+                       Opacity="0.72"
+                       Margin="0,4,0,0">
+                <Run Text="When an FPS cap &lt;= the threshold is applied, the display switches to the target Hz. Set threshold to 40 and target to 48 to match your VRR sweet spot." />
+            </TextBlock>
+
+            <Separator Margin="0,16,0,16" />
+
+            <TextBlock Text="Match refresh rate to FPS cap (non-VRR displays)"
+                       FontWeight="Bold"
+                       Margin="0,0,0,4" />
+            <TextBlock TextWrapping="Wrap"
+                       Opacity="0.72"
+                       Margin="0,0,0,8">
+                <Run Text="For displays without VRR, this switches the refresh rate to a whole multiple of the active FPS cap (e.g. a 30 FPS cap switches the display to 60 Hz, a 36 FPS cap to 72 Hz), then restores the original rate when the game stops. This keeps every capped frame mapped to the same number of display refreshes, avoiding judder. Only the refresh rates your display actually supports are used; if none of them line up evenly with the cap, the refresh rate is left alone." />
+            </TextBlock>
+
+            <CheckBox Content="Switch refresh rate to match FPS cap"
+                      IsChecked="{Binding Settings.MatchRefreshRateEnabled}"
+                      Margin="0,0,0,10" />
+
+            <Grid Margin="0,0,0,4">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="80" />
+                </Grid.ColumnDefinitions>
+
+                <TextBlock Grid.Column="0" Text="Highest multiplier to try (2x, 3x, ... up to)"
+                           VerticalAlignment="Center"
+                           Margin="0,0,8,0" />
+                <TextBox Grid.Column="1"
+                         Text="{Binding Settings.MatchRefreshRateMaxMultiplier, UpdateSourceTrigger=PropertyChanged}"
+                         IsEnabled="{Binding Settings.MatchRefreshRateEnabled}" />
+            </Grid>
+            <TextBlock TextWrapping="Wrap"
+                       Opacity="0.72"
+                       Margin="0,4,0,0">
+                <Run Text="2x is always tried first (the common case). Raise this if you want it to also try 3x or 4x the cap when your display doesn't support an exact 2x match." />
+            </TextBlock>
+            <TextBlock TextWrapping="Wrap"
+                       Opacity="0.72"
+                       Margin="0,4,0,0"
+                       FontStyle="Italic">
+                <Run Text="Note: only enable one of the two refresh-rate switching options above at a time — VRR switching is for displays with variable refresh rate, this one is for displays without it." />
+            </TextBlock>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>
