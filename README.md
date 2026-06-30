@@ -3,7 +3,7 @@ This is a fork of [mjd4219/playnite-fps-limiter](https://github.com/mjd4219/play
 - **Separate Desktop / Fullscreen profiles** per game and for the global cap, instead of one shared setting.
 - **Sync mode control** (Async / Front Edge Sync / Back Edge Sync) per game and for the global cap.
 - **Global FPS limit** as a fallback cap for games without their own profile.
-- **Live updates**: cap, sync mode, and disable changes apply immediately to an already-running game instead of waiting for the next launch.
+- **FPS cap applies on the on the fly**: cap, sync mode, and disable changes apply immediately to an already-running game instead of waiting for the next launch.
 - **RTSS auto-close**: if FPS Limiter started RTSS itself, it closes it again once no caps are active.
 - **VRR refresh-rate switching**: only for laptops without driver vrr support, that is unlocked via cru. MOST USERS DON'T NEED THIS. Off by default.
 - **Match refresh rate to FPS cap**: optionally switches the display to a supported whole multiple of the cap (e.g. 30 FPS → 60 Hz) — for displays without VRR. Off by default; most users won't need this either.
