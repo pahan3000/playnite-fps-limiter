@@ -55,7 +55,9 @@ The custom cap option opens Playnite's keyboard input dialog, so it works with a
 - `RTSS executable path`: FPS Limiter fills this with the detected `RTSS.exe` path when it can. You can edit it manually, or clear it to let auto-detection run again.
 - `Start RTSS automatically when applying a cap`: Starts RTSS if it is not already running.
 - `Use RTSS Global profile while capped games are running`: Uses the RTSS Global profile for the temporary cap. This is the most reliable mode and is enabled by default. The previous Global profile state is restored when the game stops.
-- `FPS presets`: Comma-separated values shown in Playnite menus. Spaces and trailing commas are fine; values are normalized when settings are saved.
+- `FPS presets`: Comma-separated values shown in Playnite menus. Decimals are supported (e.g. `59.9`, `23.976`) for displays without VRR that need an exact fractional cap. Spaces and trailing commas are fine; values are normalized when settings are saved.
+
+Desktop mode and Fullscreen mode each keep their own enabled/cap/sync-mode state, both for the global fallback cap and for each game's profile. Playnite detects which mode you're currently running and reads/writes that mode's values automatically; menu headings show `FPS Limiter (Desktop)` or `FPS Limiter (Fullscreen)` so it's clear which one you're editing.
 
 Default presets are:
 
@@ -97,22 +99,43 @@ In desktop mode, right-click the game and use:
 
 Fullscreen mode intentionally hides target executable controls because they are better suited to desktop setup.
 
-## Build
+## Build a .pext from source
 
-Open `FPSLimiter/FPSLimiter.sln` in Visual Studio 2022, or run:
+You need Visual Studio (Community is fine) with the ".NET desktop development" workload, and the Playnite SDK NuGet packages (already referenced in `FPSLimiter.csproj`/`packages.config`).
+
+1. Open `FPSLimiter/FPSLimiter.sln` in Visual Studio.
+2. Let NuGet restore the referenced Playnite SDK packages (Build > Restore NuGet Packages if it doesn't happen automatically).
+3. Set the configuration to `Release` and build (`Build > Build Solution`, or `Ctrl+Shift+B`).
+4. This produces a `bin/Release` folder containing `FPSLimiter.dll`, `extension.yaml`, `icon.png`, and the `Localization` folder.
+5. Find `Toolbox.exe` inside your Playnite install folder (same folder as `Playnite.DesktopApp.exe`).
+6. Pack the extension from a terminal:
+
+```powershell
+& 'C:\Path\To\Playnite\Toolbox.exe' pack `
+  'C:\Path\To\playnite-fps-limiter\FPSLimiter\bin\Release' `
+  'C:\Path\To\output\folder'
+```
+
+   The first path is the build output folder from step 4, the second is where Toolbox should write the resulting `.pext` file.
+7. Toolbox produces something like `FPSLimiter_4b308964-9a0d-4775-b7c2-78b92af4d7b6_1_0_0.pext` in the output folder.
+8. Double-click the `.pext` (or drag it into Playnite) to install it, then restart Playnite if prompted. If you had a previous version of this extension installed, Playnite will update it in place using the GUID in `FPSLimiter.cs`.
+
+If you only changed C# files (not `extension.yaml` or the manifest), you can skip straight to steps 3–8 after each edit.
+
+## Build (command line only)
 
 ```powershell
 & 'C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe' `
-  'H:\Tools\playnite-fps-limiter\FPSLimiter\FPSLimiter.sln' `
+  'C:\Path\To\playnite-fps-limiter\FPSLimiter\FPSLimiter.sln' `
   /t:Build /p:Configuration=Release /p:Platform="Any CPU"
 ```
 
-## Package
+## Package (command line only)
 
 ```powershell
-& 'C:\Playnite\Toolbox.exe' pack `
-  'H:\Tools\playnite-fps-limiter\FPSLimiter\bin\Release' `
-  'H:\Tools\playnite-fps-limiter'
+& 'C:\Path\To\Playnite\Toolbox.exe' pack `
+  'C:\Path\To\playnite-fps-limiter\FPSLimiter\bin\Release' `
+  'C:\Path\To\playnite-fps-limiter'
 ```
 
 Install the generated `.pext` in Playnite and restart Playnite if prompted.

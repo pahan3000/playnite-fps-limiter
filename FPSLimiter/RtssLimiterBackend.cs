@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -164,16 +165,16 @@ namespace FPSLimiter
             }
         }
 
-        public void EnsureRtssRunning(string rtssPath)
+        public bool EnsureRtssRunning(string rtssPath)
         {
             if (Process.GetProcessesByName("RTSS").Any())
             {
-                return;
+                return false;
             }
 
             if (!settings.AutoStartRtss)
             {
-                return;
+                return false;
             }
 
             if (!File.Exists(rtssPath))
@@ -189,9 +190,31 @@ namespace FPSLimiter
             });
 
             Thread.Sleep(1000);
+            return true;
         }
 
-        public LimitSessionSnapshot ApplyLimit(Guid gameId, string gameName, string executablePath, int frameLimit)
+        public void CloseRtssProcess()
+        {
+            foreach (var process in Process.GetProcessesByName("RTSS"))
+            {
+                try
+                {
+                    process.Kill();
+                    process.WaitForExit(3000);
+                    logger.Info("Closed RTSS because no FPS Limiter caps are active anymore.");
+                }
+                catch (Exception e)
+                {
+                    logger.Debug(e, "Could not close RTSS process.");
+                }
+                finally
+                {
+                    process.Dispose();
+                }
+            }
+        }
+
+        public LimitSessionSnapshot ApplyLimit(Guid gameId, string gameName, string executablePath, double frameLimit, FpsSyncMode syncMode, bool forceGlobalProfile)
         {
             var rtssPath = ResolveRtssPath();
             if (string.IsNullOrWhiteSpace(rtssPath))
@@ -199,9 +222,9 @@ namespace FPSLimiter
                 throw new InvalidOperationException("RTSS.exe was not found. Set the RTSS path in FPS Limiter settings.");
             }
 
-            EnsureRtssRunning(rtssPath);
+            var startedRtss = EnsureRtssRunning(rtssPath);
 
-            var usesGlobalProfile = settings.UseGlobalProfileDuringLaunch;
+            var usesGlobalProfile = forceGlobalProfile || settings.UseGlobalProfileDuringLaunch;
             var profileName = usesGlobalProfile ? GlobalProfileDisplayName : Path.GetFileName(executablePath);
             var apiProfileName = usesGlobalProfile ? string.Empty : profileName;
             if (!usesGlobalProfile && string.IsNullOrWhiteSpace(profileName))
@@ -214,12 +237,12 @@ namespace FPSLimiter
 
             try
             {
-                ApplyProfileFileLimit(rtssPath, apiProfileName, frameLimit);
+                ApplyProfileFileLimit(rtssPath, apiProfileName, frameLimit, syncMode);
                 RefreshRtssProfiles(rtssPath);
                 var fileLimit = ReadProfileFileLimit(rtssPath, apiProfileName);
-                logger.Info($"RTSS profile file {profileName} after apply: Limit={FormatFileReadback(fileLimit)}.");
+                logger.Info($"RTSS profile file {profileName} after apply: Limit={FormatFileReadback(fileLimit)}, Sync={syncMode}.");
 
-                if (!fileLimit.HasValue || fileLimit.Value != frameLimit)
+                if (!fileLimit.HasValue || Math.Abs(fileLimit.Value - frameLimit) > 0.01)
                 {
                     throw CreateProfileFilePersistenceException(rtssPath, profileName, frameLimit, null);
                 }
@@ -236,12 +259,14 @@ namespace FPSLimiter
                 ExecutablePath = executablePath,
                 ProfileName = profileName,
                 AppliedLimit = frameLimit,
+                AppliedSyncMode = syncMode,
                 UsesGlobalProfile = usesGlobalProfile,
                 ProfileExisted = profileExisted,
                 FileFallbackUsed = true,
                 ProfileFilePath = fileSnapshot.Path,
                 OriginalProfileFileExisted = fileSnapshot.Exists,
                 OriginalProfileFileContent = fileSnapshot.Content,
+                StartedRtssProcess = startedRtss,
                 StartedAt = DateTime.UtcNow
             };
         }
@@ -254,16 +279,19 @@ namespace FPSLimiter
                 throw new InvalidOperationException("RTSS.exe was not found. FPS Limiter cannot restore the previous RTSS profile yet.");
             }
 
-            EnsureRtssRunning(rtssPath);
-
             RestoreProfileFile(snapshot);
-            RefreshRtssProfiles(rtssPath);
+
+            if (Process.GetProcessesByName("RTSS").Any())
+            {
+                RefreshRtssProfiles(rtssPath);
+            }
+
             logger.Info($"Restored RTSS profile file {snapshot.ProfileName} after {snapshot.GameName}.");
         }
 
-        private static string FormatFileReadback(int? value)
+        private static string FormatFileReadback(double? value)
         {
-            return value.HasValue ? value.Value.ToString() : "unavailable";
+            return value.HasValue ? value.Value.ToString("0.###", CultureInfo.InvariantCulture) : "unavailable";
         }
 
         private static void RefreshRtssProfiles(string rtssPath)
@@ -302,12 +330,12 @@ namespace FPSLimiter
         private static InvalidOperationException CreateProfileFilePersistenceException(
             string rtssPath,
             string profileName,
-            int requestedLimit,
+            double requestedLimit,
             Exception innerException)
         {
             var profilesDirectory = GetProfilesDirectory(rtssPath);
             var message =
-                $"FPS Limiter could not write the requested {requestedLimit} FPS limit to RTSS profile {profileName}. " +
+                $"FPS Limiter could not write the requested {requestedLimit.ToString("0.###", CultureInfo.InvariantCulture)} FPS limit to RTSS profile {profileName}. " +
                 $"This usually means Playnite cannot write to the RTSS Profiles folder: {profilesDirectory}. " +
                 "Use FPS Limiter's RTSS access setup, grant Modify permission to that folder, or install RTSS in a writable location.";
 
@@ -332,21 +360,60 @@ namespace FPSLimiter
             };
         }
 
-        private static void ApplyProfileFileLimit(string rtssPath, string apiProfileName, int frameLimit)
+        private static void ApplyProfileFileLimit(string rtssPath, string apiProfileName, double frameLimit, FpsSyncMode syncMode)
         {
             var path = GetProfileFilePath(rtssPath, apiProfileName);
             var profileText = File.Exists(path)
                 ? File.ReadAllText(path, Encoding.Default)
                 : ReadDefaultProfileText(rtssPath);
 
-            profileText = SetProfileValue(profileText, "Framerate", "Limit", frameLimit.ToString());
-            profileText = SetProfileValue(profileText, "Framerate", "LimitDenominator", "1");
+            int numerator;
+            int denominator;
+            ToFraction(frameLimit, out numerator, out denominator);
+
+            profileText = SetProfileValue(profileText, "Framerate", "Limit", numerator.ToString(CultureInfo.InvariantCulture));
+            profileText = SetProfileValue(profileText, "Framerate", "LimitDenominator", denominator.ToString(CultureInfo.InvariantCulture));
+            profileText = SetProfileValue(profileText, "Framerate", "SyncLimiter", ((int)syncMode).ToString());
             profileText = SetProfileValue(profileText, "Hooking", "EnableHooking", "1");
 
             File.WriteAllText(path, profileText, Encoding.Default);
         }
 
-        private static int? ReadProfileFileLimit(string rtssPath, string apiProfileName)
+        // RTSS stores the limiter target as Limit / LimitDenominator, which lets it represent
+        // fractional caps (e.g. 59.9, 23.976) precisely instead of only whole numbers.
+        private static void ToFraction(double frameLimit, out int numerator, out int denominator)
+        {
+            denominator = 1000;
+            numerator = (int)Math.Round(frameLimit * denominator, MidpointRounding.AwayFromZero);
+
+            var divisor = Gcd(numerator, denominator);
+            if (divisor > 1)
+            {
+                numerator /= divisor;
+                denominator /= divisor;
+            }
+
+            if (denominator <= 0)
+            {
+                denominator = 1;
+            }
+        }
+
+        private static int Gcd(int a, int b)
+        {
+            a = Math.Abs(a);
+            b = Math.Abs(b);
+            while (b != 0)
+            {
+                var t = b;
+                b = a % b;
+                a = t;
+            }
+
+            return a == 0 ? 1 : a;
+        }
+
+        private static double? ReadProfileFileLimit(string rtssPath, string apiProfileName)
         {
             var path = GetProfileFilePath(rtssPath, apiProfileName);
             if (!File.Exists(path))
@@ -355,9 +422,24 @@ namespace FPSLimiter
             }
 
             var profileText = File.ReadAllText(path, Encoding.Default);
-            var value = GetProfileValue(profileText, "Framerate", "Limit");
+            var limitValue = GetProfileValue(profileText, "Framerate", "Limit");
+            var denominatorValue = GetProfileValue(profileText, "Framerate", "LimitDenominator");
+
             int limit;
-            return int.TryParse(value, out limit) ? (int?)limit : null;
+            if (!int.TryParse(limitValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out limit))
+            {
+                return null;
+            }
+
+            int denominator;
+            if (string.IsNullOrWhiteSpace(denominatorValue) ||
+                !int.TryParse(denominatorValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out denominator) ||
+                denominator <= 0)
+            {
+                denominator = 1;
+            }
+
+            return (double)limit / denominator;
         }
 
         private static void RestoreProfileFile(LimitSessionSnapshot snapshot)

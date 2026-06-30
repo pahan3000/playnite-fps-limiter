@@ -27,9 +27,42 @@ namespace FPSLimiter
 
         private FPSLimiterSettings Settings => settingsViewModel.Settings;
 
-        public IEnumerable<int> GetPresets()
+        private PlayniteUiMode CurrentMode =>
+            playniteApi.ApplicationInfo.Mode == ApplicationMode.Fullscreen
+                ? PlayniteUiMode.Fullscreen
+                : PlayniteUiMode.Desktop;
+
+        public IEnumerable<double> GetPresets()
         {
             return Settings.GetPresetValues();
+        }
+
+        public bool IsGlobalLimitEnabled => Settings.GetGlobal(CurrentMode).Enabled;
+
+        public double GlobalFrameLimit => Settings.GetGlobal(CurrentMode).FrameLimit;
+
+        public FpsSyncMode GlobalSyncMode => Settings.GetGlobal(CurrentMode).SyncMode;
+
+        public void SetGlobalLimit(double frameLimit)
+        {
+            var global = Settings.GetGlobal(CurrentMode);
+            global.Enabled = true;
+            global.FrameLimit = frameLimit;
+            settingsViewModel.SaveSettings();
+        }
+
+        public void DisableGlobalLimit()
+        {
+            var global = Settings.GetGlobal(CurrentMode);
+            global.Enabled = false;
+            global.FrameLimit = 0;
+            settingsViewModel.SaveSettings();
+        }
+
+        public void SetGlobalSyncMode(FpsSyncMode syncMode)
+        {
+            Settings.GetGlobal(CurrentMode).SyncMode = syncMode;
+            settingsViewModel.SaveSettings();
         }
 
         public GameLimitProfile GetGameProfile(Game game)
@@ -37,16 +70,63 @@ namespace FPSLimiter
             return Settings.GetGameProfile(game.Id);
         }
 
-        public void SetGameLimit(IEnumerable<Game> games, int frameLimit)
+        public void SetGameLimit(IEnumerable<Game> games, double frameLimit)
         {
-            foreach (var game in games)
+            var gameList = games.ToList();
+            foreach (var game in gameList)
             {
                 var profile = Settings.GetOrCreateGameProfile(game.Id);
-                profile.Enabled = true;
-                profile.FrameLimit = frameLimit;
+                var mode = profile.GetMode(CurrentMode);
+                mode.Enabled = true;
+                mode.FrameLimit = frameLimit;
             }
 
             settingsViewModel.SaveSettings();
+
+            foreach (var game in gameList)
+            {
+                ReapplyIfRunning(game);
+            }
+        }
+
+        public void SetGameSyncMode(IEnumerable<Game> games, FpsSyncMode syncMode)
+        {
+            var gameList = games.ToList();
+            foreach (var game in gameList)
+            {
+                var profile = Settings.GetOrCreateGameProfile(game.Id);
+                profile.GetMode(CurrentMode).SyncMode = syncMode;
+            }
+
+            settingsViewModel.SaveSettings();
+
+            foreach (var game in gameList)
+            {
+                ReapplyIfRunning(game);
+            }
+        }
+
+        /// <summary>
+        /// If the game already has an active RTSS session (i.e. it's currently running with a cap
+        /// applied), immediately re-applies the limiter with the latest settings so the change takes
+        /// effect live instead of waiting for the next launch.
+        /// </summary>
+        private void ReapplyIfRunning(Game game)
+        {
+            var hasActiveSession = Settings.ActiveSessions.Any(a => a.GameId == game.Id);
+            if (!hasActiveSession)
+            {
+                return;
+            }
+
+            try
+            {
+                TryApplyForGame(game, null, null, false);
+            }
+            catch (Exception e)
+            {
+                logger.Error(e, $"Failed to live-update FPS limit for {game.Name}.");
+            }
         }
 
         public void DisableGameLimit(IEnumerable<Game> games)
@@ -56,8 +136,9 @@ namespace FPSLimiter
                 RestoreActiveSession(game, true);
 
                 var profile = Settings.GetOrCreateGameProfile(game.Id);
-                profile.Enabled = false;
-                profile.FrameLimit = 0;
+                var mode = profile.GetMode(CurrentMode);
+                mode.Enabled = false;
+                mode.FrameLimit = 0;
                 Settings.RemoveEmptyGameProfile(game.Id);
             }
 
@@ -88,32 +169,46 @@ namespace FPSLimiter
         private bool TryApplyForGame(Game game, GameAction sourceAction, int? startedProcessId, bool showError, bool allowPermissionSetup)
         {
             var profile = Settings.GetGameProfile(game.Id);
-            if (profile == null || !profile.Enabled || profile.FrameLimit <= 0)
+            var modeLimit = profile?.GetMode(CurrentMode);
+            var hasGameProfile = modeLimit != null && modeLimit.Enabled && modeLimit.FrameLimit > 0;
+            var globalForMode = Settings.GetGlobal(CurrentMode);
+            var useGlobalFallback = !hasGameProfile && globalForMode.Enabled && globalForMode.FrameLimit > 0;
+
+            if (!hasGameProfile && !useGlobalFallback)
             {
                 return false;
             }
 
-            var target = targetResolver.ResolveTarget(game, profile, sourceAction, startedProcessId);
-            if (string.IsNullOrWhiteSpace(target) && !Settings.UseGlobalProfileDuringLaunch)
-            {
-                if (showError)
-                {
-                    playniteApi.Dialogs.ShowErrorMessage(
-                        $"FPS Limiter could not find a target executable for {game.Name}. Set a manual target executable from the game context menu.",
-                        "FPS Limiter");
-                }
+            var frameLimit = hasGameProfile ? modeLimit.FrameLimit : globalForMode.FrameLimit;
+            var syncMode = hasGameProfile ? modeLimit.SyncMode : globalForMode.SyncMode;
+            var forceGlobalProfile = useGlobalFallback || Settings.UseGlobalProfileDuringLaunch;
 
-                return false;
+            string target = null;
+            if (hasGameProfile)
+            {
+                target = targetResolver.ResolveTarget(game, profile, sourceAction, startedProcessId);
+                if (string.IsNullOrWhiteSpace(target) && !Settings.UseGlobalProfileDuringLaunch)
+                {
+                    if (showError)
+                    {
+                        playniteApi.Dialogs.ShowErrorMessage(
+                            $"FPS Limiter could not find a target executable for {game.Name}. Set a manual target executable from the game context menu.",
+                            "FPS Limiter");
+                    }
+
+                    return false;
+                }
             }
 
             var existingSession = Settings.ActiveSessions.FirstOrDefault(a => a.GameId == game.Id);
-            var profileName = Settings.UseGlobalProfileDuringLaunch ? "Global" : Path.GetFileName(target);
+            var profileName = forceGlobalProfile ? "Global" : Path.GetFileName(target);
             if (existingSession != null)
             {
                 if (string.Equals(existingSession.ProfileName, profileName, StringComparison.OrdinalIgnoreCase) &&
-                    existingSession.AppliedLimit == profile.FrameLimit)
+                    existingSession.AppliedLimit == frameLimit &&
+                    existingSession.AppliedSyncMode == syncMode)
                 {
-                    if (!string.IsNullOrWhiteSpace(target))
+                    if (hasGameProfile && !string.IsNullOrWhiteSpace(target))
                     {
                         profile.LastResolvedExecutable = target;
                     }
@@ -122,21 +217,30 @@ namespace FPSLimiter
                     return true;
                 }
 
-                RestoreSession(existingSession, false);
+                RestoreSession(existingSession, false, true);
             }
 
             try
             {
-                var session = rtssBackend.ApplyLimit(game.Id, game.Name, target, profile.FrameLimit);
+                var session = rtssBackend.ApplyLimit(game.Id, game.Name, target, frameLimit, syncMode, forceGlobalProfile);
                 Settings.ActiveSessions.RemoveAll(a => a.GameId == game.Id);
+
+                // Switch display refresh rate when capping to a low FPS target
+                TrySwitchRefreshRateForCap(session, frameLimit);
+
                 Settings.ActiveSessions.Add(session);
-                if (!string.IsNullOrWhiteSpace(target))
+                if (hasGameProfile && !string.IsNullOrWhiteSpace(target))
                 {
                     profile.LastResolvedExecutable = target;
                 }
 
+                if (session.StartedRtssProcess)
+                {
+                    Settings.RtssStartedByExtension = true;
+                }
+
                 settingsViewModel.SaveSettings();
-                logger.Info($"Applied {profile.FrameLimit} FPS limit to {game.Name} via RTSS profile {session.ProfileName}.");
+                logger.Info($"Applied {frameLimit} FPS limit ({syncMode}) to {game.Name} via RTSS profile {session.ProfileName}.");
                 return true;
             }
             catch (Exception e)
@@ -147,7 +251,7 @@ namespace FPSLimiter
                 {
                     if (allowPermissionSetup && ShouldOfferRtssAccessSetup(e))
                     {
-                        if (OfferRtssAccessSetup(game, profile.FrameLimit, e))
+                        if (OfferRtssAccessSetup(game, frameLimit, e))
                         {
                             return TryApplyForGame(game, sourceAction, startedProcessId, showError, false);
                         }
@@ -155,7 +259,7 @@ namespace FPSLimiter
                     else
                     {
                         playniteApi.Dialogs.ShowErrorMessage(
-                            $"FPS Limiter could not apply the {profile.FrameLimit} FPS cap to {game.Name}.\n\n{e.Message}",
+                            $"FPS Limiter could not apply the {frameLimit} FPS cap to {game.Name}.\n\n{e.Message}",
                             "FPS Limiter");
                     }
                 }
@@ -164,7 +268,7 @@ namespace FPSLimiter
             }
         }
 
-        private bool OfferRtssAccessSetup(Game game, int frameLimit, Exception originalError)
+        private bool OfferRtssAccessSetup(Game game, double frameLimit, Exception originalError)
         {
             var setupOption = new MessageBoxOption("Set up RTSS access", true, false);
             var continueOption = new MessageBoxOption("Continue without cap", false, true);
@@ -236,7 +340,8 @@ namespace FPSLimiter
         public void RetargetAfterLaunch(Game game, GameAction sourceAction, int? startedProcessId)
         {
             var profile = Settings.GetGameProfile(game.Id);
-            if (profile == null || !profile.Enabled || profile.FrameLimit <= 0)
+            var modeLimit = profile?.GetMode(CurrentMode);
+            if (modeLimit == null || !modeLimit.Enabled || modeLimit.FrameLimit <= 0)
             {
                 return;
             }
@@ -270,13 +375,22 @@ namespace FPSLimiter
             {
                 if (currentSession != null)
                 {
-                    RestoreSession(currentSession, false);
+                    RestoreSession(currentSession, false, true);
                 }
 
-                var session = rtssBackend.ApplyLimit(game.Id, game.Name, actualTarget, profile.FrameLimit);
+                var session = rtssBackend.ApplyLimit(game.Id, game.Name, actualTarget, modeLimit.FrameLimit, modeLimit.SyncMode, false);
                 Settings.ActiveSessions.RemoveAll(a => a.GameId == game.Id);
+
+                TrySwitchRefreshRateForCap(session, modeLimit.FrameLimit);
+
                 Settings.ActiveSessions.Add(session);
                 profile.LastResolvedExecutable = actualTarget;
+
+                if (session.StartedRtssProcess)
+                {
+                    Settings.RtssStartedByExtension = true;
+                }
+
                 settingsViewModel.SaveSettings();
 
                 logger.Info($"Retargeted {game.Name} FPS limit from {Path.GetFileName(currentExecutable)} to {session.ProfileName}.");
@@ -304,14 +418,112 @@ namespace FPSLimiter
             }
         }
 
+        private void TrySwitchRefreshRateForCap(LimitSessionSnapshot session, double frameLimit)
+        {
+            if (Settings.VrrRefreshRateEnabled)
+            {
+                TrySwitchToFixedRefreshRate(session, frameLimit);
+            }
+            else if (Settings.MatchRefreshRateEnabled)
+            {
+                TrySwitchToMatchingRefreshRate(session, frameLimit);
+            }
+        }
+
+        private void TrySwitchToFixedRefreshRate(LimitSessionSnapshot session, double frameLimit)
+        {
+            if (frameLimit <= 0 || frameLimit > Settings.VrrFpsThreshold)
+            {
+                return;
+            }
+
+            var current = RefreshRateManager.GetCurrentRefreshRate();
+            if (current <= 0 || current == Settings.VrrTargetHz)
+            {
+                return;
+            }
+
+            if (RefreshRateManager.SetRefreshRate(Settings.VrrTargetHz))
+            {
+                session.RefreshRateChanged = true;
+                session.OriginalRefreshRate = current;
+                logger.Info($"Switched display to {Settings.VrrTargetHz} Hz for {frameLimit} FPS cap on {session.GameName} (was {current} Hz).");
+            }
+            else
+            {
+                logger.Warn($"Could not switch display to {Settings.VrrTargetHz} Hz for {session.GameName}.");
+            }
+        }
+
+        private void TrySwitchToMatchingRefreshRate(LimitSessionSnapshot session, double frameLimit)
+        {
+            if (frameLimit <= 0)
+            {
+                return;
+            }
+
+            var fps = (int)Math.Round(frameLimit);
+            var target = RefreshRateManager.FindMatchingRefreshRate(fps, Settings.MatchRefreshRateMaxMultiplier);
+            if (target <= 0)
+            {
+                logger.Info($"No supported refresh rate is a clean multiple of {fps} FPS for {session.GameName}; leaving display rate unchanged.");
+                return;
+            }
+
+            var current = RefreshRateManager.GetCurrentRefreshRate();
+            if (current <= 0 || current == target)
+            {
+                return;
+            }
+
+            if (RefreshRateManager.SetRefreshRate(target))
+            {
+                session.RefreshRateChanged = true;
+                session.OriginalRefreshRate = current;
+                logger.Info($"Matched display to {target} Hz for {fps} FPS cap on {session.GameName} (was {current} Hz).");
+            }
+            else
+            {
+                logger.Warn($"Could not switch display to {target} Hz for {session.GameName}.");
+            }
+        }
+
         private void RestoreSession(LimitSessionSnapshot snapshot, bool showError)
+        {
+            RestoreSession(snapshot, showError, false);
+        }
+
+        private void RestoreSession(LimitSessionSnapshot snapshot, bool showError, bool suppressRtssClose)
         {
             try
             {
                 rtssBackend.RestoreLimit(snapshot);
                 Settings.ActiveSessions.RemoveAll(a => a.GameId == snapshot.GameId && string.Equals(a.ProfileName, snapshot.ProfileName, StringComparison.OrdinalIgnoreCase));
-                settingsViewModel.SaveSettings();
                 logger.Info($"Restored RTSS profile {snapshot.ProfileName} after {snapshot.GameName}.");
+
+                // Restore display refresh rate if we changed it for this session
+                if (snapshot.RefreshRateChanged && snapshot.OriginalRefreshRate > 0)
+                {
+                    if (RefreshRateManager.SetRefreshRate(snapshot.OriginalRefreshRate))
+                    {
+                        logger.Info($"Restored display refresh rate to {snapshot.OriginalRefreshRate} Hz after {snapshot.GameName}.");
+                    }
+                    else
+                    {
+                        logger.Warn($"Failed to restore display refresh rate to {snapshot.OriginalRefreshRate} Hz after {snapshot.GameName}.");
+                    }
+                }
+
+                // When this restore is immediately followed by re-applying a new limit (e.g. a live
+                // cap change while the game is still running), skip the "no caps left, close RTSS"
+                // check entirely so RTSS doesn't flash closed/reopened mid-session.
+                if (!suppressRtssClose && Settings.RtssStartedByExtension && !Settings.ActiveSessions.Any())
+                {
+                    rtssBackend.CloseRtssProcess();
+                    Settings.RtssStartedByExtension = false;
+                }
+
+                settingsViewModel.SaveSettings();
             }
             catch (Exception e)
             {
