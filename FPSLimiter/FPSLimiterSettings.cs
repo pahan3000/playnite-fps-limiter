@@ -2,10 +2,12 @@ using Playnite.SDK;
 using Playnite.SDK.Data;
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Windows;
+using System.Windows.Input;
 
 namespace FPSLimiter
 {
@@ -74,6 +76,7 @@ namespace FPSLimiter
         private bool rtssStartedByExtension = false;
         private List<GameLimitProfile> gameLimits = new List<GameLimitProfile>();
         private List<LimitSessionSnapshot> activeSessions = new List<LimitSessionSnapshot>();
+        private ObservableCollection<HotkeyBinding> hotkeys = new ObservableCollection<HotkeyBinding>();
 
         // VRR refresh-rate switching
         private bool vrrRefreshRateEnabled = false;
@@ -141,6 +144,13 @@ namespace FPSLimiter
         {
             get => activeSessions ?? (activeSessions = new List<LimitSessionSnapshot>());
             set => SetValue(ref activeSessions, value ?? new List<LimitSessionSnapshot>());
+        }
+
+        /// <summary>Global keyboard shortcuts that apply an FPS cap to the currently running (or selected) game.</summary>
+        public ObservableCollection<HotkeyBinding> Hotkeys
+        {
+            get => hotkeys ?? (hotkeys = new ObservableCollection<HotkeyBinding>());
+            set => SetValue(ref hotkeys, value ?? new ObservableCollection<HotkeyBinding>());
         }
 
         /// <summary>
@@ -303,6 +313,166 @@ namespace FPSLimiter
         public int OriginalRefreshRate { get; set; }
     }
 
+    /// <summary>
+    /// A global keyboard shortcut that applies (or disables) an FPS cap on whichever game
+    /// currently has an active RTSS session, falling back to the game selected in the library.
+    /// </summary>
+    public class HotkeyBinding : ObservableObject
+    {
+        private bool enabled = true;
+        private bool disableCap = false;
+        private double frameLimit = 60;
+        private string frameLimitText = FormatFrameLimit(60);
+        private ModifierKeys modifiers = ModifierKeys.Control | ModifierKeys.Alt;
+        private Key key = Key.None;
+
+        public bool Enabled
+        {
+            get => enabled;
+            set => SetValue(ref enabled, value);
+        }
+
+        /// <summary>When true, pressing the hotkey disables the FPS cap instead of applying FrameLimit.</summary>
+        public bool DisableCap
+        {
+            get => disableCap;
+            set
+            {
+                SetValue(ref disableCap, value);
+                OnPropertyChanged(nameof(DisplayText));
+            }
+        }
+
+        public double FrameLimit
+        {
+            get => frameLimit;
+            set
+            {
+                if (frameLimit.Equals(value))
+                {
+                    return;
+                }
+
+                frameLimit = value;
+                OnPropertyChanged(nameof(FrameLimit));
+
+                var formatted = FormatFrameLimit(value);
+                if (!string.Equals(frameLimitText, formatted, StringComparison.Ordinal))
+                {
+                    frameLimitText = formatted;
+                    OnPropertyChanged(nameof(FrameLimitText));
+                }
+            }
+        }
+
+        /// <summary>
+        /// Text-editable proxy for <see cref="FrameLimit"/>. The hotkey FPS textbox binds to this
+        /// instead of FrameLimit directly, because WPF's default numeric value converter parses
+        /// using the current culture and rejects intermediate keystrokes like "59." while typing a
+        /// decimal such as "59.9", making it look like fractional caps can't be entered at all.
+        /// Parsing here always uses invariant culture (so "." is the decimal separator regardless of
+        /// Windows locale) and only pushes a value into FrameLimit once it's a complete, valid number,
+        /// so partial input while typing is never rejected or reformatted out from under the user.
+        /// </summary>
+        public string FrameLimitText
+        {
+            get => frameLimitText;
+            set
+            {
+                if (string.Equals(frameLimitText, value, StringComparison.Ordinal))
+                {
+                    return;
+                }
+
+                frameLimitText = value;
+                OnPropertyChanged(nameof(FrameLimitText));
+
+                if (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed) &&
+                    parsed > 0 && parsed <= 1000)
+                {
+                    frameLimit = parsed;
+                    OnPropertyChanged(nameof(FrameLimit));
+                }
+            }
+        }
+
+        private static string FormatFrameLimit(double value)
+        {
+            return value.ToString("0.###", CultureInfo.InvariantCulture);
+        }
+
+        public ModifierKeys Modifiers
+        {
+            get => modifiers;
+            set
+            {
+                SetValue(ref modifiers, value);
+                OnPropertyChanged(nameof(DisplayText));
+            }
+        }
+
+        public Key Key
+        {
+            get => key;
+            set
+            {
+                SetValue(ref key, value);
+                OnPropertyChanged(nameof(DisplayText));
+            }
+        }
+
+        /// <summary>Human-readable combo, e.g. "Ctrl + Alt + F1". Not persisted; derived from Modifiers/Key.</summary>
+        public string DisplayText
+        {
+            get
+            {
+                if (Key == Key.None)
+                {
+                    return "Click, then press a key combo...";
+                }
+
+                var parts = new List<string>();
+                if (Modifiers.HasFlag(ModifierKeys.Control))
+                {
+                    parts.Add("Ctrl");
+                }
+
+                if (Modifiers.HasFlag(ModifierKeys.Alt))
+                {
+                    parts.Add("Alt");
+                }
+
+                if (Modifiers.HasFlag(ModifierKeys.Shift))
+                {
+                    parts.Add("Shift");
+                }
+
+                if (Modifiers.HasFlag(ModifierKeys.Windows))
+                {
+                    parts.Add("Win");
+                }
+
+                parts.Add(KeyToDisplayString(Key));
+                return string.Join(" + ", parts);
+            }
+        }
+
+        private static string KeyToDisplayString(Key key)
+        {
+            if (key >= Key.D0 && key <= Key.D9)
+            {
+                return ((int)(key - Key.D0)).ToString(CultureInfo.InvariantCulture);
+            }
+
+            if (key >= Key.NumPad0 && key <= Key.NumPad9)
+            {
+                return "Num" + (int)(key - Key.NumPad0);
+            }
+
+            return key.ToString();
+        }
+    }
+
     public class FPSLimiterSettingsViewModel : ObservableObject, ISettings
     {
         private readonly FPSLimiter plugin;
@@ -312,6 +482,8 @@ namespace FPSLimiter
 
         public RelayCommand TestRtssProfilePermissionsCommand { get; private set; }
         public RelayCommand FixRtssProfilePermissionsCommand { get; private set; }
+        public RelayCommand AddHotkeyCommand { get; private set; }
+        public RelayCommand<HotkeyBinding> RemoveHotkeyCommand { get; private set; }
 
         public FPSLimiterSettings Settings
         {
@@ -334,6 +506,21 @@ namespace FPSLimiter
 
             TestRtssProfilePermissionsCommand = new RelayCommand(TestRtssProfilePermissions);
             FixRtssProfilePermissionsCommand = new RelayCommand(FixRtssProfilePermissions);
+            AddHotkeyCommand = new RelayCommand(AddHotkey);
+            RemoveHotkeyCommand = new RelayCommand<HotkeyBinding>(RemoveHotkey);
+        }
+
+        private void AddHotkey()
+        {
+            Settings.Hotkeys.Add(new HotkeyBinding { Key = Key.None });
+        }
+
+        private void RemoveHotkey(HotkeyBinding binding)
+        {
+            if (binding != null)
+            {
+                Settings.Hotkeys.Remove(binding);
+            }
         }
 
         public void SaveSettings()
@@ -356,6 +543,7 @@ namespace FPSLimiter
         {
             NormalizeSettings();
             SaveSettings();
+            plugin.RefreshHotkeys();
         }
 
         public bool VerifySettings(out List<string> errors)
@@ -383,6 +571,24 @@ namespace FPSLimiter
                 }
             }
 
+            foreach (var hotkey in Settings.Hotkeys)
+            {
+                if (hotkey.Enabled && hotkey.Key != Key.None && !hotkey.DisableCap &&
+                    (hotkey.FrameLimit <= 0 || hotkey.FrameLimit > 1000))
+                {
+                    errors.Add($"Hotkey {hotkey.DisplayText}: enter an FPS value between 1 and 1000, or check \"Disable cap\".");
+                }
+            }
+
+            var duplicateCombo = Settings.Hotkeys
+                .Where(a => a.Enabled && a.Key != Key.None)
+                .GroupBy(a => new { a.Modifiers, a.Key })
+                .FirstOrDefault(g => g.Count() > 1);
+            if (duplicateCombo != null)
+            {
+                errors.Add($"The hotkey {duplicateCombo.First().DisplayText} is assigned more than once.");
+            }
+
             return !errors.Any();
         }
 
@@ -390,6 +596,11 @@ namespace FPSLimiter
         {
             Settings.PresetsText = string.Join(", ", Settings.GetPresetValues().Select(FormatFps));
             Settings.RtssPath = Settings.RtssPath?.Trim() ?? string.Empty;
+
+            foreach (var hotkey in Settings.Hotkeys)
+            {
+                hotkey.FrameLimitText = FormatFps(hotkey.FrameLimit);
+            }
         }
 
         private static string FormatFps(double value)

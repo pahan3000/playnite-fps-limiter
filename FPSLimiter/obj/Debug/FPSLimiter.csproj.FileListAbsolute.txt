@@ -1,0 +1,17 @@
+C:\playnite_extensions\playnite-fps-limiter-main\FPSLimiter\bin\Debug\extension.yaml
+C:\playnite_extensions\playnite-fps-limiter-main\FPSLimiter\bin\Debug\Localization\en_US.xaml
+C:\playnite_extensions\playnite-fps-limiter-main\FPSLimiter\bin\Debug\icon.png
+C:\playnite_extensions\playnite-fps-limiter-main\FPSLimiter\bin\Debug\FPSLimiter.dll
+C:\playnite_extensions\playnite-fps-limiter-main\FPSLimiter\bin\Debug\FPSLimiter.pdb
+C:\playnite_extensions\playnite-fps-limiter-main\FPSLimiter\bin\Debug\Playnite.SDK.dll
+C:\playnite_extensions\playnite-fps-limiter-main\FPSLimiter\bin\Debug\Playnite.SDK.xml
+C:\playnite_extensions\playnite-fps-limiter-main\FPSLimiter\obj\Debug\FPSLimiter.csproj.AssemblyReference.cache
+C:\playnite_extensions\playnite-fps-limiter-main\FPSLimiter\obj\Debug\App.baml
+C:\playnite_extensions\playnite-fps-limiter-main\FPSLimiter\obj\Debug\FPSLimiterSettingsView.baml
+C:\playnite_extensions\playnite-fps-limiter-main\FPSLimiter\obj\Debug\FPSLimiterSettingsView.g.cs
+C:\playnite_extensions\playnite-fps-limiter-main\FPSLimiter\obj\Debug\FPSLimiter_MarkupCompile.cache
+C:\playnite_extensions\playnite-fps-limiter-main\FPSLimiter\obj\Debug\FPSLimiter.g.resources
+C:\playnite_extensions\playnite-fps-limiter-main\FPSLimiter\obj\Debug\FPSLimiter.csproj.CoreCompileInputs.cache
+C:\playnite_extensions\playnite-fps-limiter-main\FPSLimiter\obj\Debug\FPSLimiter.csproj.Up2Date
+C:\playnite_extensions\playnite-fps-limiter-main\FPSLimiter\obj\Debug\FPSLimiter.dll
+C:\playnite_extensions\playnite-fps-limiter-main\FPSLimiter\obj\Debug\FPSLimiter.pdb

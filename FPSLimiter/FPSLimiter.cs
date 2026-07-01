@@ -8,6 +8,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using System.Windows;
 using System.Windows.Controls;
 
 namespace FPSLimiter
@@ -25,6 +26,7 @@ namespace FPSLimiter
 
         private FPSLimiterSettingsViewModel settings;
         private LimiterService limiterService;
+        private HotkeyManager hotkeyManager;
 
         public override Guid Id { get; } = Guid.Parse("4b308964-9a0d-4775-b7c2-78b92af4d7b6");
 
@@ -45,11 +47,126 @@ namespace FPSLimiter
             {
                 limiterService.RestoreAllActiveSessions(true);
             }
+
+            InitializeHotkeys();
         }
 
         public override void OnApplicationStopped(OnApplicationStoppedEventArgs args)
         {
             limiterService.RestoreAllActiveSessions(false);
+            hotkeyManager?.Dispose();
+        }
+
+        private void InitializeHotkeys()
+        {
+            try
+            {
+                hotkeyManager = new HotkeyManager();
+                hotkeyManager.HotkeyPressed += OnHotkeyPressed;
+
+                var window = Application.Current?.MainWindow;
+                if (window == null)
+                {
+                    if (Application.Current != null)
+                    {
+                        Application.Current.Activated += OnApplicationActivatedForHotkeys;
+                    }
+
+                    return;
+                }
+
+                if (window.IsLoaded)
+                {
+                    AttachHotkeys(window);
+                }
+                else
+                {
+                    window.SourceInitialized += (s, e) => AttachHotkeys(window);
+                }
+            }
+            catch (Exception e)
+            {
+                logger.Error(e, "FPS Limiter could not initialize hotkeys.");
+            }
+        }
+
+        private void OnApplicationActivatedForHotkeys(object sender, EventArgs e)
+        {
+            if (Application.Current != null)
+            {
+                Application.Current.Activated -= OnApplicationActivatedForHotkeys;
+            }
+
+            var window = Application.Current?.MainWindow;
+            if (window != null)
+            {
+                AttachHotkeys(window);
+            }
+        }
+
+        private void AttachHotkeys(Window window)
+        {
+            if (hotkeyManager != null && hotkeyManager.Attach(window))
+            {
+                RefreshHotkeys();
+            }
+        }
+
+        /// <summary>Re-registers all enabled hotkeys from current settings. Call after settings change.</summary>
+        public void RefreshHotkeys()
+        {
+            hotkeyManager?.UpdateBindings(settings.Settings.Hotkeys);
+        }
+
+        private void OnHotkeyPressed(HotkeyBinding binding)
+        {
+            try
+            {
+                var games = ResolveHotkeyTargetGames();
+                if (!games.Any())
+                {
+                    logger.Debug($"FPS Limiter hotkey {binding.DisplayText} pressed but no running or selected game to target.");
+                    return;
+                }
+
+                if (binding.DisableCap)
+                {
+                    limiterService.DisableGameLimit(games);
+                    logger.Info($"FPS Limiter hotkey {binding.DisplayText}: cap disabled for {DescribeGames(games)}.");
+                }
+                else
+                {
+                    limiterService.SetGameLimit(games, binding.FrameLimit);
+                    logger.Info($"FPS Limiter hotkey {binding.DisplayText}: {FormatFps(binding.FrameLimit)} FPS applied to {DescribeGames(games)}.");
+                }
+            }
+            catch (Exception e)
+            {
+                logger.Error(e, "FPS Limiter failed to apply a hotkey.");
+            }
+        }
+
+        /// <summary>
+        /// Targets whichever game(s) are actually running right now; if none are running, falls
+        /// back to the game(s) selected in the library.
+        /// </summary>
+        private List<Game> ResolveHotkeyTargetGames()
+        {
+            var runningGameIds = limiterService.GetRunningGameIds().Distinct().ToList();
+            if (runningGameIds.Any())
+            {
+                return runningGameIds
+                    .Select(id => PlayniteApi.Database.Games.Get(id))
+                    .Where(g => g != null)
+                    .ToList();
+            }
+
+            return PlayniteApi.MainView.SelectedGames?.ToList() ?? new List<Game>();
+        }
+
+        private static string DescribeGames(List<Game> games)
+        {
+            return games.Count == 1 ? games[0].Name : $"{games.Count} games";
         }
 
         public override void OnGameStarting(OnGameStartingEventArgs args)
@@ -59,17 +176,20 @@ namespace FPSLimiter
 
         public override void OnGameStarted(OnGameStartedEventArgs args)
         {
+            limiterService.NotifyGameStarted(args.Game.Id);
             limiterService.TryApplyForGame(args.Game, args.SourceAction, args.StartedProcessId, false);
             Task.Run(() => limiterService.RetargetAfterLaunch(args.Game, args.SourceAction, args.StartedProcessId));
         }
 
         public override void OnGameStartupCancelled(OnGameStartupCancelledEventArgs args)
         {
+            limiterService.NotifyGameStopped(args.Game.Id);
             limiterService.RestoreActiveSession(args.Game, false);
         }
 
         public override void OnGameStopped(OnGameStoppedEventArgs args)
         {
+            limiterService.NotifyGameStopped(args.Game.Id);
             limiterService.RestoreActiveSession(args.Game, true);
         }
 
@@ -181,6 +301,166 @@ namespace FPSLimiter
         public override ISettings GetSettings(bool firstRunSettings)
         {
             return settings;
+        }
+
+        public override IEnumerable<TopPanelItem> GetTopPanelItems()
+        {
+            yield return new TopPanelItem
+            {
+                Icon = GetIconPath(),
+                Title = "FPS Limiter (apply to selected game)",
+                Activated = () => ShowTopPanelMenu()
+            };
+        }
+
+        private string GetIconPath()
+        {
+            var cachedIconPath = Path.Combine(Path.GetTempPath(), "FPSLimiter_RTSS_icon.png");
+
+            try
+            {
+                var rtssPath = limiterService.ResolveRtssPath();
+                if (!string.IsNullOrWhiteSpace(rtssPath) && File.Exists(rtssPath))
+                {
+                    var rtssWriteTime = File.GetLastWriteTimeUtc(rtssPath);
+                    var needsExtract = !File.Exists(cachedIconPath) ||
+                        File.GetLastWriteTimeUtc(cachedIconPath) < rtssWriteTime;
+
+                    if (needsExtract)
+                    {
+                        using (var icon = System.Drawing.Icon.ExtractAssociatedIcon(rtssPath))
+                        {
+                            if (icon != null)
+                            {
+                                using (var bitmap = icon.ToBitmap())
+                                {
+                                    bitmap.Save(cachedIconPath, System.Drawing.Imaging.ImageFormat.Png);
+                                }
+                            }
+                        }
+                    }
+
+                    if (File.Exists(cachedIconPath))
+                    {
+                        return cachedIconPath;
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                logger.Debug(e, "Could not extract RTSS icon, falling back to bundled icon.");
+            }
+
+            var assemblyLocation = System.Reflection.Assembly.GetExecutingAssembly().Location;
+            var directory = Path.GetDirectoryName(assemblyLocation);
+            return Path.Combine(directory ?? string.Empty, "icon.png");
+        }
+
+        private void ShowTopPanelMenu()
+        {
+            var games = PlayniteApi.MainView.SelectedGames?.ToList() ?? new List<Game>();
+            if (!games.Any())
+            {
+                PlayniteApi.Dialogs.ShowMessage("Select a game in the library first.", "FPS Limiter");
+                return;
+            }
+
+            var presetList = limiterService.GetPresets().ToList();
+            var options = new List<GenericItemOption>();
+
+            foreach (var preset in presetList)
+            {
+                options.Add(new GenericItemOption(GetPresetMenuText(games, preset), string.Empty));
+            }
+
+            var customOption = new GenericItemOption(GetCustomMenuText(games), "Custom...");
+            options.Add(customOption);
+
+            var disableOption = new GenericItemOption("Disable FPS cap", "Disable");
+            options.Add(disableOption);
+
+            var syncModeOption = new GenericItemOption(GetTopPanelSyncModeMenuText(games), "Sync mode");
+            options.Add(syncModeOption);
+
+            var caption = games.Count == 1
+                ? $"FPS Limiter - {games[0].Name}"
+                : $"FPS Limiter - {games.Count} games selected";
+
+            var selected = PlayniteApi.Dialogs.ChooseItemWithSearch(
+                options,
+                _ => options,
+                null,
+                caption);
+
+            if (selected == null)
+            {
+                return;
+            }
+
+            if (ReferenceEquals(selected, customOption))
+            {
+                SetCustomCap(games);
+                return;
+            }
+
+            if (ReferenceEquals(selected, disableOption))
+            {
+                limiterService.DisableGameLimit(games);
+                return;
+            }
+
+            if (ReferenceEquals(selected, syncModeOption))
+            {
+                ShowTopPanelSyncModeMenu(games);
+                return;
+            }
+
+            var index = options.IndexOf(selected);
+            if (index >= 0 && index < presetList.Count)
+            {
+                limiterService.SetGameLimit(games, presetList[index]);
+            }
+        }
+
+        private void ShowTopPanelSyncModeMenu(List<Game> games)
+        {
+            var options = SyncModes
+                .Select(mode => new GenericItemOption(GetSyncModeMenuText(games, mode), string.Empty))
+                .ToList();
+
+            var caption = games.Count == 1
+                ? $"FPS Limiter Sync Mode - {games[0].Name}"
+                : $"FPS Limiter Sync Mode - {games.Count} games selected";
+
+            var selected = PlayniteApi.Dialogs.ChooseItemWithSearch(
+                options,
+                _ => options,
+                null,
+                caption);
+
+            if (selected == null)
+            {
+                return;
+            }
+
+            var index = options.IndexOf(selected);
+            if (index >= 0 && index < SyncModes.Length)
+            {
+                limiterService.SetGameSyncMode(games, SyncModes[index]);
+            }
+        }
+
+        private string GetTopPanelSyncModeMenuText(List<Game> games)
+        {
+            if (games.Count == 1)
+            {
+                var profile = limiterService.GetGameProfile(games[0]);
+                var defaultSyncMode = CurrentMode == PlayniteUiMode.Desktop ? FpsSyncMode.FrontEdgeSync : FpsSyncMode.Async;
+                var current = profile?.GetMode(CurrentMode).SyncMode ?? defaultSyncMode;
+                return $"Sync mode: {FpsSyncModeNames.GetDisplayName(current)}";
+            }
+
+            return "Sync mode...";
         }
 
         private PlayniteUiMode CurrentMode =>

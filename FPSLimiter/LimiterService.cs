@@ -17,6 +17,14 @@ namespace FPSLimiter
         private readonly RtssLimiterBackend rtssBackend;
         private readonly GameTargetResolver targetResolver;
 
+        // Tracks which games are actually running right now, independent of whether they currently
+        // have an active RTSS cap session. ActiveSessions is *not* a reliable "is this game running"
+        // signal on its own: disabling the cap (or any restore) removes the game's entry from
+        // ActiveSessions even though the game keeps running, which used to make later attempts to
+        // re-apply a cap silently no-op because ReapplyIfRunning/hotkey targeting thought nothing
+        // was running anymore.
+        private readonly HashSet<Guid> runningGameIds = new HashSet<Guid>();
+
         public LimiterService(IPlayniteAPI playniteApi, FPSLimiterSettingsViewModel settingsViewModel)
         {
             this.playniteApi = playniteApi;
@@ -35,6 +43,11 @@ namespace FPSLimiter
         public IEnumerable<double> GetPresets()
         {
             return Settings.GetPresetValues();
+        }
+
+        public string ResolveRtssPath()
+        {
+            return rtssBackend.ResolveRtssPath();
         }
 
         public bool IsGlobalLimitEnabled => Settings.GetGlobal(CurrentMode).Enabled;
@@ -68,6 +81,24 @@ namespace FPSLimiter
         public GameLimitProfile GetGameProfile(Game game)
         {
             return Settings.GetGameProfile(game.Id);
+        }
+
+        /// <summary>Marks a game as currently running. Call once the game process has actually started.</summary>
+        public void NotifyGameStarted(Guid gameId)
+        {
+            runningGameIds.Add(gameId);
+        }
+
+        /// <summary>Marks a game as no longer running (stopped, or the launch was cancelled).</summary>
+        public void NotifyGameStopped(Guid gameId)
+        {
+            runningGameIds.Remove(gameId);
+        }
+
+        /// <summary>Games currently known to be running, used to target hotkeys at the right game(s).</summary>
+        public IEnumerable<Guid> GetRunningGameIds()
+        {
+            return runningGameIds.ToList();
         }
 
         public void SetGameLimit(IEnumerable<Game> games, double frameLimit)
@@ -107,14 +138,14 @@ namespace FPSLimiter
         }
 
         /// <summary>
-        /// If the game already has an active RTSS session (i.e. it's currently running with a cap
-        /// applied), immediately re-applies the limiter with the latest settings so the change takes
-        /// effect live instead of waiting for the next launch.
+        /// If the game is currently running, immediately re-applies the limiter with the latest
+        /// settings so the change takes effect live instead of waiting for the next launch. This is
+        /// keyed off actual running state, not off whether a cap session is currently tracked, so it
+        /// keeps working even right after the cap was disabled while the game is still running.
         /// </summary>
         private void ReapplyIfRunning(Game game)
         {
-            var hasActiveSession = Settings.ActiveSessions.Any(a => a.GameId == game.Id);
-            if (!hasActiveSession)
+            if (!runningGameIds.Contains(game.Id))
             {
                 return;
             }
