@@ -29,7 +29,7 @@ namespace FPSLimiter
         private LimiterService limiterService;
         private HotkeyManager hotkeyManager;
 
-        public override Guid Id { get; } = Guid.Parse("4b308964-9a0d-4775-b7c2-78b92af4d7b6");
+        public override Guid Id { get; } = Guid.Parse("cd5ffd73-3b1a-45d7-86b4-9183f1d858f5");
 
         public FPSLimiter(IPlayniteAPI api) : base(api)
         {

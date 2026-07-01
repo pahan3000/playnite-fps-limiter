@@ -1,18 +1,16 @@
-AddonId: FPSLimiter_4b308964-9a0d-4775-b7c2-78b92af4d7b6
+AddonId: FPSLimiter_cd5ffd73-3b1a-45d7-86b4-9183f1d858f5
 Packages:
   - Version: 1.0.2
     RequiredApiVersion: 6.16.0
     ReleaseDate: 2026-07-01
-    PackageUrl: https://github.com/mjd4219/playnite-fps-limiter/releases/download/v1.0.2/FPSLimiter_4b308964-9a0d-4775-b7c2-78b92af4d7b6_1_0_2.pext
+    PackageUrl: https://github.com/pahan3000/playnite-fps-limiter/releases/download/v1.0.2/FPSLimiter_4b308964-9a0d-4775-b7c2-78b92af4d7b6_1_0_2.pext
     Changelog:
       - Added a button to apply the VRR-safe FPS cap directly as the Global FPS limiter (Desktop or Fullscreen)
-  - Version: 1.0.1
-    RequiredApiVersion: 6.16.0
-    ReleaseDate: 2026-06-15
-    PackageUrl: https://github.com/mjd4219/playnite-fps-limiter/releases/download/v1.0.0/FPSLimiter_4b308964-9a0d-4775-b7c2-78b92af4d7b6_1_0_0.pext
-    Changelog:
-      - Initial public release
-      - Set per-game FPS caps from Desktop and Fullscreen menus
-      - Added RTSS profile file integration with one-time access setup
-      - Added configurable presets, custom caps, and desktop manual target executable selection
-      - Restores previous RTSS profile state when the game stops
+      - Fractional FPS caps (e.g. 59.9, 23.976)
+      - Separate Desktop / Fullscreen profiles per game and for the global cap
+      - Sync mode control (Async / Front Edge Sync / Back Edge Sync) per game and for the global cap
+      - Global FPS limit as a fallback cap for games without their own profile
+      - Cap, sync mode, and disable changes apply on the fly to an already-running game
+      - RTSS auto-close when FPS Limiter started it itself
+      - Optional VRR refresh-rate switching and refresh-rate-to-cap matching for non-VRR displays
+      - Global hotkeys to apply or disable an FPS cap on the currently running game
