@@ -21,7 +21,8 @@ namespace FPSLimiter
         {
             FpsSyncMode.Async,
             FpsSyncMode.FrontEdgeSync,
-            FpsSyncMode.BackEdgeSync
+            FpsSyncMode.BackEdgeSync,
+            FpsSyncMode.ReflexSync
         };
 
         private FPSLimiterSettingsViewModel settings;

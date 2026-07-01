@@ -1,5 +1,11 @@
 AddonId: FPSLimiter_4b308964-9a0d-4775-b7c2-78b92af4d7b6
 Packages:
+  - Version: 1.0.2
+    RequiredApiVersion: 6.16.0
+    ReleaseDate: 2026-07-01
+    PackageUrl: https://github.com/mjd4219/playnite-fps-limiter/releases/download/v1.0.2/FPSLimiter_4b308964-9a0d-4775-b7c2-78b92af4d7b6_1_0_2.pext
+    Changelog:
+      - Added a button to apply the VRR-safe FPS cap directly as the Global FPS limiter (Desktop or Fullscreen)
   - Version: 1.0.1
     RequiredApiVersion: 6.16.0
     ReleaseDate: 2026-06-15

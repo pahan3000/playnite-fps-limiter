@@ -15,7 +15,8 @@ namespace FPSLimiter
     {
         Async = 0,
         FrontEdgeSync = 1,
-        BackEdgeSync = 2
+        BackEdgeSync = 2,
+        ReflexSync = 3
     }
 
     public static class FpsSyncModeNames
@@ -28,6 +29,8 @@ namespace FPSLimiter
                     return "Front Edge Sync";
                 case FpsSyncMode.BackEdgeSync:
                     return "Back Edge Sync";
+                case FpsSyncMode.ReflexSync:
+                    return "NVIDIA Reflex";
                 default:
                     return "Async";
             }
@@ -44,6 +47,7 @@ namespace FPSLimiter
     {
         private bool enabled = false;
         private double frameLimit = 0;
+        private string frameLimitText = FormatFrameLimit(0);
         private FpsSyncMode syncMode = FpsSyncMode.Async;
 
         public bool Enabled
@@ -55,13 +59,62 @@ namespace FPSLimiter
         public double FrameLimit
         {
             get => frameLimit;
-            set => SetValue(ref frameLimit, value);
+            set
+            {
+                if (frameLimit.Equals(value))
+                {
+                    return;
+                }
+
+                frameLimit = value;
+                OnPropertyChanged(nameof(FrameLimit));
+
+                var formatted = FormatFrameLimit(value);
+                if (!string.Equals(frameLimitText, formatted, StringComparison.Ordinal))
+                {
+                    frameLimitText = formatted;
+                    OnPropertyChanged(nameof(FrameLimitText));
+                }
+            }
+        }
+
+        /// <summary>
+        /// Text-editable proxy for <see cref="FrameLimit"/>, same reasoning as
+        /// <see cref="HotkeyBinding.FrameLimitText"/>: lets the settings page's Global FPS limit
+        /// fields accept fractional values like "59.9" without WPF's default numeric converter
+        /// fighting the user mid-keystroke.
+        /// </summary>
+        public string FrameLimitText
+        {
+            get => frameLimitText;
+            set
+            {
+                if (string.Equals(frameLimitText, value, StringComparison.Ordinal))
+                {
+                    return;
+                }
+
+                frameLimitText = value;
+                OnPropertyChanged(nameof(FrameLimitText));
+
+                if (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed) &&
+                    parsed >= 0 && parsed <= 1000)
+                {
+                    frameLimit = parsed;
+                    OnPropertyChanged(nameof(FrameLimit));
+                }
+            }
         }
 
         public FpsSyncMode SyncMode
         {
             get => syncMode;
             set => SetValue(ref syncMode, value);
+        }
+
+        private static string FormatFrameLimit(double value)
+        {
+            return value.ToString("0.###", CultureInfo.InvariantCulture);
         }
     }
 
@@ -473,6 +526,13 @@ namespace FPSLimiter
         }
     }
 
+    /// <summary>Display-friendly wrapper for a FpsSyncMode value, used by settings-page combo boxes.</summary>
+    public class SyncModeOption
+    {
+        public FpsSyncMode Value { get; set; }
+        public string DisplayName { get; set; }
+    }
+
     public class FPSLimiterSettingsViewModel : ObservableObject, ISettings
     {
         private readonly FPSLimiter plugin;
@@ -484,6 +544,32 @@ namespace FPSLimiter
         public RelayCommand FixRtssProfilePermissionsCommand { get; private set; }
         public RelayCommand AddHotkeyCommand { get; private set; }
         public RelayCommand<HotkeyBinding> RemoveHotkeyCommand { get; private set; }
+        public RelayCommand RefreshVrrSafeCapCommand { get; private set; }
+        public RelayCommand AddVrrSafeCapToPresetsCommand { get; private set; }
+        public RelayCommand ApplyVrrSafeCapToGlobalDesktopCommand { get; private set; }
+        public RelayCommand ApplyVrrSafeCapToGlobalFullscreenCommand { get; private set; }
+
+        /// <summary>Options for the Global FPS limit sync-mode combo boxes (Async / Front Edge / Back Edge / Reflex).</summary>
+        public List<SyncModeOption> SyncModeOptions { get; } = ((FpsSyncMode[])Enum.GetValues(typeof(FpsSyncMode)))
+            .Select(mode => new SyncModeOption { Value = mode, DisplayName = FpsSyncModeNames.GetDisplayName(mode) })
+            .ToList();
+
+        private double vrrSafeCapValue;
+        private string vrrSafeCapPreview;
+
+        /// <summary>The last-computed Blur Busters VRR-safe cap (0 if the refresh rate couldn't be detected).</summary>
+        public double VrrSafeCapValue
+        {
+            get => vrrSafeCapValue;
+            private set => SetValue(ref vrrSafeCapValue, value);
+        }
+
+        /// <summary>Human-readable summary of the detected refresh rate and its VRR-safe cap.</summary>
+        public string VrrSafeCapPreview
+        {
+            get => vrrSafeCapPreview;
+            private set => SetValue(ref vrrSafeCapPreview, value);
+        }
 
         public FPSLimiterSettings Settings
         {
@@ -508,6 +594,58 @@ namespace FPSLimiter
             FixRtssProfilePermissionsCommand = new RelayCommand(FixRtssProfilePermissions);
             AddHotkeyCommand = new RelayCommand(AddHotkey);
             RemoveHotkeyCommand = new RelayCommand<HotkeyBinding>(RemoveHotkey);
+            RefreshVrrSafeCapCommand = new RelayCommand(RecalculateVrrSafeCap);
+            AddVrrSafeCapToPresetsCommand = new RelayCommand(AddVrrSafeCapToPresets);
+            ApplyVrrSafeCapToGlobalDesktopCommand = new RelayCommand(() => ApplyVrrSafeCapToGlobal(PlayniteUiMode.Desktop));
+            ApplyVrrSafeCapToGlobalFullscreenCommand = new RelayCommand(() => ApplyVrrSafeCapToGlobal(PlayniteUiMode.Fullscreen));
+
+            RecalculateVrrSafeCap();
+        }
+
+        private void RecalculateVrrSafeCap()
+        {
+            var hz = RefreshRateManager.GetCurrentRefreshRate();
+            if (hz <= 0)
+            {
+                VrrSafeCapValue = 0;
+                VrrSafeCapPreview = "Could not detect the current display refresh rate.";
+                return;
+            }
+
+            VrrSafeCapValue = Math.Round(RefreshRateManager.GetVrrSafeCap(hz), 2, MidpointRounding.AwayFromZero);
+            VrrSafeCapPreview = $"Detected {hz} Hz \u2192 recommended VRR-safe cap: {FormatFps(VrrSafeCapValue)} FPS";
+        }
+
+        private void AddVrrSafeCapToPresets()
+        {
+            if (VrrSafeCapValue <= 0)
+            {
+                return;
+            }
+
+            var values = Settings.GetPresetValues();
+            if (!values.Any(v => Math.Abs(v - VrrSafeCapValue) < 0.001))
+            {
+                values.Add(VrrSafeCapValue);
+            }
+
+            Settings.PresetsText = string.Join(", ", values.OrderBy(v => v).Select(FormatFps));
+        }
+
+        /// <summary>
+        /// Applies the last-computed VRR-safe cap as the Global FPS limit (and enables it) for the
+        /// given Playnite UI mode, so it's used as the fallback cap for games without their own preset.
+        /// </summary>
+        private void ApplyVrrSafeCapToGlobal(PlayniteUiMode mode)
+        {
+            if (VrrSafeCapValue <= 0)
+            {
+                return;
+            }
+
+            var target = Settings.GetGlobal(mode);
+            target.FrameLimit = VrrSafeCapValue;
+            target.Enabled = true;
         }
 
         private void AddHotkey()
@@ -562,6 +700,18 @@ namespace FPSLimiter
                 errors.Add("Add at least one FPS preset between 1 and 1000.");
             }
 
+            if (Settings.GlobalDesktop.Enabled &&
+                (Settings.GlobalDesktop.FrameLimit <= 0 || Settings.GlobalDesktop.FrameLimit > 1000))
+            {
+                errors.Add("Global FPS limit (Desktop): enter an FPS value between 1 and 1000, or uncheck Enabled.");
+            }
+
+            if (Settings.GlobalFullscreen.Enabled &&
+                (Settings.GlobalFullscreen.FrameLimit <= 0 || Settings.GlobalFullscreen.FrameLimit > 1000))
+            {
+                errors.Add("Global FPS limit (Fullscreen): enter an FPS value between 1 and 1000, or uncheck Enabled.");
+            }
+
             foreach (var profile in Settings.GameLimits)
             {
                 if (!string.IsNullOrWhiteSpace(profile.ManualExecutablePath) &&
@@ -596,6 +746,8 @@ namespace FPSLimiter
         {
             Settings.PresetsText = string.Join(", ", Settings.GetPresetValues().Select(FormatFps));
             Settings.RtssPath = Settings.RtssPath?.Trim() ?? string.Empty;
+            Settings.GlobalDesktop.FrameLimitText = FormatFps(Settings.GlobalDesktop.FrameLimit);
+            Settings.GlobalFullscreen.FrameLimitText = FormatFps(Settings.GlobalFullscreen.FrameLimit);
 
             foreach (var hotkey in Settings.Hotkeys)
             {

@@ -71,13 +71,134 @@
                        FontWeight="Bold"
                        Margin="0,0,0,4" />
             <TextBlock TextWrapping="Wrap"
-                       Opacity="0.72">
-                <Run Text="A fallback cap for games that don't have their own preset is available from Playnite's main menu under" />
+                       Opacity="0.72"
+                       Margin="0,0,0,8">
+                <Run Text="A fallback cap for games that don't have their own preset. It's only written to RTSS and only starts RTSS while a game using that fallback is running, and RTSS is closed again once no FPS Limiter caps are active. This is the same setting as Playnite's main menu under" />
                 <Run Text=" Extensions &gt; FPS Limiter &gt; Global FPS limit" FontWeight="SemiBold" />
-                <Run Text=". It's only written to RTSS and only starts RTSS while a game using that fallback is running, and RTSS is closed again once no FPS Limiter caps are active. Each game's right-click menu also has a" />
-                <Run Text=" Sync mode" FontWeight="SemiBold" />
-                <Run Text=" submenu (Async / Front Edge Sync / Back Edge Sync), and the global fallback has its own sync mode submenu next to it." />
+                <Run Text="; edit it here or there, whichever is handier. Desktop and Fullscreen have their own independent cap so you don't need to switch modes just to set the other one." />
             </TextBlock>
+
+            <Grid Margin="0,0,0,8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="90" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="16" />
+                    <ColumnDefinition Width="70" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="16" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="170" />
+                </Grid.ColumnDefinitions>
+
+                <TextBlock Grid.Column="0" Text="Desktop"
+                           FontWeight="SemiBold"
+                           VerticalAlignment="Center" />
+                <CheckBox Grid.Column="1" Content="Enabled"
+                          IsChecked="{Binding Settings.GlobalDesktop.Enabled}"
+                          VerticalAlignment="Center" />
+                <TextBox Grid.Column="3"
+                         Text="{Binding Settings.GlobalDesktop.FrameLimitText, UpdateSourceTrigger=PropertyChanged}"
+                         IsEnabled="{Binding Settings.GlobalDesktop.Enabled}"
+                         VerticalAlignment="Center" />
+                <TextBlock Grid.Column="4" Text="FPS"
+                           VerticalAlignment="Center"
+                           Opacity="0.72"
+                           Margin="4,0,0,0" />
+                <TextBlock Grid.Column="6" Text="Sync mode"
+                           VerticalAlignment="Center"
+                           Opacity="0.72"
+                           Margin="0,0,8,0" />
+                <ComboBox Grid.Column="7"
+                          ItemsSource="{Binding SyncModeOptions}"
+                          DisplayMemberPath="DisplayName"
+                          SelectedValuePath="Value"
+                          SelectedValue="{Binding Settings.GlobalDesktop.SyncMode}"
+                          IsEnabled="{Binding Settings.GlobalDesktop.Enabled}" />
+            </Grid>
+
+            <Grid Margin="0,0,0,16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="90" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="16" />
+                    <ColumnDefinition Width="70" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="16" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="170" />
+                </Grid.ColumnDefinitions>
+
+                <TextBlock Grid.Column="0" Text="Fullscreen"
+                           FontWeight="SemiBold"
+                           VerticalAlignment="Center" />
+                <CheckBox Grid.Column="1" Content="Enabled"
+                          IsChecked="{Binding Settings.GlobalFullscreen.Enabled}"
+                          VerticalAlignment="Center" />
+                <TextBox Grid.Column="3"
+                         Text="{Binding Settings.GlobalFullscreen.FrameLimitText, UpdateSourceTrigger=PropertyChanged}"
+                         IsEnabled="{Binding Settings.GlobalFullscreen.Enabled}"
+                         VerticalAlignment="Center" />
+                <TextBlock Grid.Column="4" Text="FPS"
+                           VerticalAlignment="Center"
+                           Opacity="0.72"
+                           Margin="4,0,0,0" />
+                <TextBlock Grid.Column="6" Text="Sync mode"
+                           VerticalAlignment="Center"
+                           Opacity="0.72"
+                           Margin="0,0,8,0" />
+                <ComboBox Grid.Column="7"
+                          ItemsSource="{Binding SyncModeOptions}"
+                          DisplayMemberPath="DisplayName"
+                          SelectedValuePath="Value"
+                          SelectedValue="{Binding Settings.GlobalFullscreen.SyncMode}"
+                          IsEnabled="{Binding Settings.GlobalFullscreen.Enabled}" />
+            </Grid>
+
+            <TextBlock TextWrapping="Wrap"
+                       Opacity="0.72"
+                       Margin="0,0,0,16">
+                <Run Text="Each game's right-click menu also has its own" />
+                <Run Text=" Sync mode" FontWeight="SemiBold" />
+                <Run Text=" submenu (Async / Front Edge Sync / Back Edge Sync / NVIDIA Reflex) that overrides the global one for that game." />
+            </TextBlock>
+
+            <TextBlock Text="VRR-safe FPS cap"
+                       FontWeight="Bold"
+                       Margin="0,0,0,4" />
+            <TextBlock TextWrapping="Wrap"
+                       Opacity="0.72"
+                       Margin="0,0,0,8">
+                <Run Text="Suggests a cap comfortably under your display's current refresh rate using Blur Busters' formula (Refresh - Refresh" />
+                <Run Text="&#178;" BaselineAlignment="Superscript" FontSize="10" />
+                <Run Text=" / 3600), so frame delivery never outruns the VRR window right at the refresh-rate ceiling, which is what causes stutter." />
+            </TextBlock>
+            <StackPanel Orientation="Horizontal"
+                        Margin="0,0,0,4">
+                <TextBlock Text="{Binding VrrSafeCapPreview}"
+                           VerticalAlignment="Center"
+                           Margin="0,0,12,0" />
+                <Button Content="Refresh"
+                        Command="{Binding RefreshVrrSafeCapCommand}"
+                        Padding="8,2"
+                        Margin="0,0,8,0" />
+                <Button Content="Add to presets"
+                        Command="{Binding AddVrrSafeCapToPresetsCommand}"
+                        Padding="8,2" />
+            </StackPanel>
+            <TextBlock Text="Use it as your Global FPS limit fallback instead of (or in addition to) a preset:"
+                       TextWrapping="Wrap"
+                       Opacity="0.72"
+                       Margin="0,0,0,4" />
+            <StackPanel Orientation="Horizontal"
+                        Margin="0,0,0,16">
+                <Button Content="Set as Global (Desktop)"
+                        Command="{Binding ApplyVrrSafeCapToGlobalDesktopCommand}"
+                        Padding="8,2"
+                        Margin="0,0,8,0" />
+                <Button Content="Set as Global (Fullscreen)"
+                        Command="{Binding ApplyVrrSafeCapToGlobalFullscreenCommand}"
+                        Padding="8,2" />
+            </StackPanel>
 
             <Separator Margin="0,16,0,16" />
 

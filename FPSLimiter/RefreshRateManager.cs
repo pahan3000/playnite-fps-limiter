@@ -183,5 +183,20 @@ namespace FPSLimiter
 
             return supported.Contains(fps) ? fps : 0;
         }
+        /// <summary>
+        /// Blur Busters' recommended safe FPS cap for VRR (G-Sync/FreeSync) displays: comfortably
+        /// under the panel's max refresh rate so frame delivery never outruns the VRR window, which
+        /// is what causes stutter/frame-time spikes right at the refresh-rate ceiling.
+        /// Formula: Refresh - (Refresh^2 / 3600).
+        /// </summary>
+        public static double GetVrrSafeCap(double refreshHz)
+        {
+            if (refreshHz <= 0)
+            {
+                return 0;
+            }
+
+            return refreshHz - (refreshHz * refreshHz) / 3600.0;
+        }
     }
 }
