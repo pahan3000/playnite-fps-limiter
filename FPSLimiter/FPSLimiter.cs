@@ -7,6 +7,8 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Net.Http;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
@@ -29,6 +31,10 @@ namespace FPSLimiter
         private LimiterService limiterService;
         private HotkeyManager hotkeyManager;
 
+        private const string UpdateRepoOwner = "pahan3000";
+        private const string UpdateRepoName = "playnite-fps-limiter";
+        private static readonly TimeSpan UpdateCheckInterval = TimeSpan.FromHours(24);
+
         public override Guid Id { get; } = Guid.Parse("cd5ffd73-3b1a-45d7-86b4-9183f1d858f5");
 
         public FPSLimiter(IPlayniteAPI api) : base(api)
@@ -50,6 +56,72 @@ namespace FPSLimiter
             }
 
             InitializeHotkeys();
+
+            Task.Run(() => CheckForUpdatesAsync());
+        }
+
+        /// <summary>
+        /// Checks the GitHub releases page for a newer published version and, if found, shows a
+        /// Playnite notification linking to the release. Throttled so it only actually hits the
+        /// network once per <see cref="UpdateCheckInterval"/>.
+        /// </summary>
+        private async Task CheckForUpdatesAsync()
+        {
+            try
+            {
+                if (DateTime.UtcNow - settings.Settings.LastUpdateCheckUtc < UpdateCheckInterval)
+                {
+                    return;
+                }
+
+                settings.Settings.LastUpdateCheckUtc = DateTime.UtcNow;
+                settings.PersistUpdateCheckState();
+
+                string json;
+                using (var client = new HttpClient())
+                {
+                    client.Timeout = TimeSpan.FromSeconds(10);
+                    client.DefaultRequestHeaders.UserAgent.ParseAdd("PlayniteFPSLimiter-UpdateCheck");
+                    var url = $"https://api.github.com/repos/{UpdateRepoOwner}/{UpdateRepoName}/releases/latest";
+                    json = await client.GetStringAsync(url).ConfigureAwait(false);
+                }
+
+                var tagMatch = Regex.Match(json, "\"tag_name\"\\s*:\\s*\"([^\"]+)\"");
+                var urlMatch = Regex.Match(json, "\"html_url\"\\s*:\\s*\"([^\"]+)\"");
+
+                if (!tagMatch.Success)
+                {
+                    return;
+                }
+
+                var latestTag = tagMatch.Groups[1].Value.TrimStart('v', 'V');
+                var releaseUrl = urlMatch.Success
+                    ? urlMatch.Groups[1].Value
+                    : $"https://github.com/{UpdateRepoOwner}/{UpdateRepoName}/releases/latest";
+
+                var currentVersion = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
+
+                if (!Version.TryParse(latestTag, out var latestVersion) || latestVersion <= currentVersion)
+                {
+                    return;
+                }
+
+                PlayniteApi.Notifications.Add(new NotificationMessage(
+                    "FPSLimiter_UpdateAvailable_" + latestTag,
+                    $"FPS Limiter v{latestTag} is available (you have v{currentVersion.ToString(3)}). Click to view the release.",
+                    NotificationType.Info,
+                    () =>
+                    {
+                        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(releaseUrl)
+                        {
+                            UseShellExecute = true
+                        });
+                    }));
+            }
+            catch (Exception e)
+            {
+                logger.Warn(e, "FPS Limiter update check failed.");
+            }
         }
 
         public override void OnApplicationStopped(OnApplicationStoppedEventArgs args)

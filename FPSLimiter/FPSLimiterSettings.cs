@@ -130,6 +130,7 @@ namespace FPSLimiter
         private List<GameLimitProfile> gameLimits = new List<GameLimitProfile>();
         private List<LimitSessionSnapshot> activeSessions = new List<LimitSessionSnapshot>();
         private ObservableCollection<HotkeyBinding> hotkeys = new ObservableCollection<HotkeyBinding>();
+        private DateTime lastUpdateCheckUtc = DateTime.MinValue;
 
         // VRR refresh-rate switching
         private bool vrrRefreshRateEnabled = false;
@@ -197,6 +198,12 @@ namespace FPSLimiter
         {
             get => activeSessions ?? (activeSessions = new List<LimitSessionSnapshot>());
             set => SetValue(ref activeSessions, value ?? new List<LimitSessionSnapshot>());
+        }
+
+        public DateTime LastUpdateCheckUtc
+        {
+            get => lastUpdateCheckUtc;
+            set => SetValue(ref lastUpdateCheckUtc, value);
         }
 
         /// <summary>Global keyboard shortcuts that apply an FPS cap to the currently running (or selected) game.</summary>
@@ -662,6 +669,15 @@ namespace FPSLimiter
         }
 
         public void SaveSettings()
+        {
+            plugin.SavePluginSettings(Settings);
+        }
+
+        /// <summary>
+        /// Persists just the update-check bookkeeping (last-checked time / dismissed version)
+        /// without going through the settings dialog's edit/save flow.
+        /// </summary>
+        public void PersistUpdateCheckState()
         {
             plugin.SavePluginSettings(Settings);
         }
