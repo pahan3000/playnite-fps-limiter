@@ -74,14 +74,16 @@ namespace FPSLimiter
 
         /// <summary>
         /// Checks the GitHub releases page for a newer published version and, if found, shows a
-        /// Playnite notification linking to the release. Throttled so it only actually hits the
-        /// network once per <see cref="UpdateCheckInterval"/>.
+        /// Playnite notification linking to the release. Automatic (startup) calls are throttled
+        /// to once per <see cref="UpdateCheckInterval"/>; pass <paramref name="manual"/> to bypass
+        /// the throttle and surface the result (found/up to date/error) directly to the user,
+        /// e.g. from the "Check for updates now" menu item.
         /// </summary>
-        private async Task CheckForUpdatesAsync()
+        private async Task CheckForUpdatesAsync(bool manual = false)
         {
             try
             {
-                if (DateTime.UtcNow - settings.Settings.LastUpdateCheckUtc < UpdateCheckInterval)
+                if (!manual && DateTime.UtcNow - settings.Settings.LastUpdateCheckUtc < UpdateCheckInterval)
                 {
                     return;
                 }
@@ -90,12 +92,27 @@ namespace FPSLimiter
                 settings.PersistUpdateCheckState();
 
                 string json;
-                using (var client = new HttpClient())
+                try
                 {
-                    client.Timeout = TimeSpan.FromSeconds(10);
-                    client.DefaultRequestHeaders.UserAgent.ParseAdd("PlayniteFPSLimiter-UpdateCheck");
-                    var url = $"https://api.github.com/repos/{UpdateRepoOwner}/{UpdateRepoName}/releases/latest";
-                    json = await client.GetStringAsync(url).ConfigureAwait(false);
+                    using (var client = new HttpClient())
+                    {
+                        client.Timeout = TimeSpan.FromSeconds(10);
+                        client.DefaultRequestHeaders.UserAgent.ParseAdd("PlayniteFPSLimiter-UpdateCheck");
+                        var url = $"https://api.github.com/repos/{UpdateRepoOwner}/{UpdateRepoName}/releases/latest";
+                        json = await client.GetStringAsync(url).ConfigureAwait(false);
+                    }
+                }
+                catch (Exception e)
+                {
+                    logger.Warn(e, "FPS Limiter update check failed.");
+                    if (manual)
+                    {
+                        PlayniteApi.Dialogs.ShowErrorMessage(
+                            $"FPS Limiter could not reach GitHub to check for updates.\n\n{e.Message}",
+                            "FPS Limiter");
+                    }
+
+                    return;
                 }
 
                 var tagMatch = Regex.Match(json, "\"tag_name\"\\s*:\\s*\"([^\"]+)\"");
@@ -103,6 +120,13 @@ namespace FPSLimiter
 
                 if (!tagMatch.Success)
                 {
+                    if (manual)
+                    {
+                        PlayniteApi.Dialogs.ShowErrorMessage(
+                            "FPS Limiter could not read release information from GitHub. The latest release may be missing, or marked as a draft/pre-release (those are excluded from the check).",
+                            "FPS Limiter");
+                    }
+
                     return;
                 }
 
@@ -113,8 +137,27 @@ namespace FPSLimiter
 
                 var currentVersion = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
 
-                if (!Version.TryParse(latestTag, out var latestVersion) || latestVersion <= currentVersion)
+                if (!Version.TryParse(latestTag, out var latestVersion))
                 {
+                    if (manual)
+                    {
+                        PlayniteApi.Dialogs.ShowErrorMessage(
+                            $"FPS Limiter could not parse the latest release tag ('{tagMatch.Groups[1].Value}'). Release tags should look like 'v1.0.3'.",
+                            "FPS Limiter");
+                    }
+
+                    return;
+                }
+
+                if (latestVersion <= currentVersion)
+                {
+                    if (manual)
+                    {
+                        PlayniteApi.Dialogs.ShowMessage(
+                            $"FPS Limiter is up to date (v{currentVersion.ToString(3)}).\n\nLatest GitHub release: v{latestVersion.ToString(3)}.",
+                            "FPS Limiter");
+                    }
+
                     return;
                 }
 
@@ -122,18 +165,40 @@ namespace FPSLimiter
                     "FPSLimiter_UpdateAvailable_" + latestTag,
                     $"FPS Limiter v{latestTag} is available (you have v{currentVersion.ToString(3)}). Click to view the release.",
                     NotificationType.Info,
-                    () =>
+                    () => OpenUrl(releaseUrl)));
+
+                if (manual)
+                {
+                    var response = PlayniteApi.Dialogs.ShowMessage(
+                        $"FPS Limiter v{latestTag} is available (you have v{currentVersion.ToString(3)}).\n\nOpen the release page now?",
+                        "FPS Limiter",
+                        MessageBoxButton.YesNo,
+                        MessageBoxImage.Information);
+
+                    if (response == MessageBoxResult.Yes)
                     {
-                        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(releaseUrl)
-                        {
-                            UseShellExecute = true
-                        });
-                    }));
+                        OpenUrl(releaseUrl);
+                    }
+                }
             }
             catch (Exception e)
             {
                 logger.Warn(e, "FPS Limiter update check failed.");
+                if (manual)
+                {
+                    PlayniteApi.Dialogs.ShowErrorMessage(
+                        $"FPS Limiter could not check for updates.\n\n{e.Message}",
+                        "FPS Limiter");
+                }
             }
+        }
+
+        private static void OpenUrl(string url)
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url)
+            {
+                UseShellExecute = true
+            });
         }
 
         public override void OnApplicationStopped(OnApplicationStoppedEventArgs args)
@@ -381,6 +446,13 @@ namespace FPSLimiter
                     Action = _ => limiterService.SetGlobalSyncMode(mode)
                 };
             }
+
+            yield return new MainMenuItem
+            {
+                MenuSection = menuRoot,
+                Description = "Check for updates now",
+                Action = _ => Task.Run(() => CheckForUpdatesAsync(true))
+            };
         }
 
         public override ISettings GetSettings(bool firstRunSettings)
