@@ -83,6 +83,38 @@ namespace FPSLimiter
             return Settings.GetGameProfile(game.Id);
         }
 
+        /// <summary>
+        /// Resolves the sync mode a per-game ModeLimitSettings actually applies: its own explicit
+        /// choice, or the current Global sync mode (for the same Playnite UI mode) when the game
+        /// is left on <see cref="FpsSyncMode.UseGlobal"/>.
+        /// </summary>
+        private FpsSyncMode ResolveEffectiveSyncMode(ModeLimitSettings modeLimit, PlayniteUiMode mode)
+        {
+            if (modeLimit != null && modeLimit.SyncMode != FpsSyncMode.UseGlobal)
+            {
+                return modeLimit.SyncMode;
+            }
+
+            return Settings.GetGlobal(mode).SyncMode;
+        }
+
+        /// <summary>The sync mode a single game will actually apply right now, resolving "Use Global" if set.</summary>
+        public FpsSyncMode GetEffectiveGameSyncMode(Game game)
+        {
+            var profile = GetGameProfile(game);
+            return ResolveEffectiveSyncMode(profile?.GetMode(CurrentMode), CurrentMode);
+        }
+
+        /// <summary>Whether the VRR low-fps refresh-rate switch is currently enabled.</summary>
+        public bool VrrRefreshRateEnabled => Settings.VrrRefreshRateEnabled;
+
+        /// <summary>Toggles VRR low-fps refresh-rate switching on/off, e.g. from the top bar button.</summary>
+        public void ToggleVrrRefreshRateEnabled()
+        {
+            Settings.VrrRefreshRateEnabled = !Settings.VrrRefreshRateEnabled;
+            settingsViewModel.SaveSettings();
+        }
+
         /// <summary>Marks a game as currently running. Call once the game process has actually started.</summary>
         public void NotifyGameStarted(Guid gameId)
         {
@@ -211,7 +243,7 @@ namespace FPSLimiter
             }
 
             var frameLimit = hasGameProfile ? modeLimit.FrameLimit : globalForMode.FrameLimit;
-            var syncMode = hasGameProfile ? modeLimit.SyncMode : globalForMode.SyncMode;
+            var syncMode = hasGameProfile ? ResolveEffectiveSyncMode(modeLimit, CurrentMode) : globalForMode.SyncMode;
             var forceGlobalProfile = useGlobalFallback || Settings.UseGlobalProfileDuringLaunch;
 
             string target = null;
@@ -409,7 +441,8 @@ namespace FPSLimiter
                     RestoreSession(currentSession, false, true);
                 }
 
-                var session = rtssBackend.ApplyLimit(game.Id, game.Name, actualTarget, modeLimit.FrameLimit, modeLimit.SyncMode, false);
+                var syncMode = ResolveEffectiveSyncMode(modeLimit, CurrentMode);
+                var session = rtssBackend.ApplyLimit(game.Id, game.Name, actualTarget, modeLimit.FrameLimit, syncMode, false);
                 Settings.ActiveSessions.RemoveAll(a => a.GameId == game.Id);
 
                 TrySwitchRefreshRateForCap(session, modeLimit.FrameLimit);

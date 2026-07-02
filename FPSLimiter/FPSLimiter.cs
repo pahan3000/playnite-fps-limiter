@@ -19,8 +19,20 @@ namespace FPSLimiter
     {
         private static readonly ILogger logger = LogManager.GetLogger();
         private const string ActiveMenuPrefix = "\u2713 ";
+        // Used for the Global sync mode menu, which has no parent to fall back to.
         private static readonly FpsSyncMode[] SyncModes =
         {
+            FpsSyncMode.Async,
+            FpsSyncMode.FrontEdgeSync,
+            FpsSyncMode.BackEdgeSync,
+            FpsSyncMode.ReflexSync
+        };
+
+        // Used for per-game sync mode menus (game context menu, top bar button), which can also
+        // track whichever Global sync mode is currently active instead of a fixed choice.
+        private static readonly FpsSyncMode[] GameSyncModes =
+        {
+            FpsSyncMode.UseGlobal,
             FpsSyncMode.Async,
             FpsSyncMode.FrontEdgeSync,
             FpsSyncMode.BackEdgeSync,
@@ -301,7 +313,7 @@ namespace FPSLimiter
                 Action = _ => limiterService.DisableGameLimit(games)
             };
 
-            foreach (var mode in SyncModes)
+            foreach (var mode in GameSyncModes)
             {
                 yield return new GameMenuItem
                 {
@@ -455,6 +467,9 @@ namespace FPSLimiter
             var syncModeOption = new GenericItemOption(GetTopPanelSyncModeMenuText(games), "Sync mode");
             options.Add(syncModeOption);
 
+            var vrrOption = new GenericItemOption(GetVrrToggleMenuText(), "VRR refresh-rate switching");
+            options.Add(vrrOption);
+
             var caption = games.Count == 1
                 ? $"FPS Limiter - {games[0].Name}"
                 : $"FPS Limiter - {games.Count} games selected";
@@ -488,6 +503,12 @@ namespace FPSLimiter
                 return;
             }
 
+            if (ReferenceEquals(selected, vrrOption))
+            {
+                limiterService.ToggleVrrRefreshRateEnabled();
+                return;
+            }
+
             var index = options.IndexOf(selected);
             if (index >= 0 && index < presetList.Count)
             {
@@ -495,9 +516,16 @@ namespace FPSLimiter
             }
         }
 
+        private string GetVrrToggleMenuText()
+        {
+            var state = limiterService.VrrRefreshRateEnabled ? "On" : "Off";
+            var prefix = limiterService.VrrRefreshRateEnabled ? ActiveMenuPrefix : string.Empty;
+            return $"{prefix}VRR refresh-rate switching: {state}";
+        }
+
         private void ShowTopPanelSyncModeMenu(List<Game> games)
         {
-            var options = SyncModes
+            var options = GameSyncModes
                 .Select(mode => new GenericItemOption(GetSyncModeMenuText(games, mode), string.Empty))
                 .ToList();
 
@@ -517,9 +545,9 @@ namespace FPSLimiter
             }
 
             var index = options.IndexOf(selected);
-            if (index >= 0 && index < SyncModes.Length)
+            if (index >= 0 && index < GameSyncModes.Length)
             {
-                limiterService.SetGameSyncMode(games, SyncModes[index]);
+                limiterService.SetGameSyncMode(games, GameSyncModes[index]);
             }
         }
 
@@ -527,13 +555,28 @@ namespace FPSLimiter
         {
             if (games.Count == 1)
             {
-                var profile = limiterService.GetGameProfile(games[0]);
-                var defaultSyncMode = CurrentMode == PlayniteUiMode.Desktop ? FpsSyncMode.FrontEdgeSync : FpsSyncMode.Async;
-                var current = profile?.GetMode(CurrentMode).SyncMode ?? defaultSyncMode;
-                return $"Sync mode: {FpsSyncModeNames.GetDisplayName(current)}";
+                return $"Sync mode: {GetSyncModeDisplayName(GetSelectedSyncMode(games[0]))}";
             }
 
             return "Sync mode...";
+        }
+
+        /// <summary>The sync mode currently stored on the game's profile (UseGlobal if none set yet).</summary>
+        private FpsSyncMode GetSelectedSyncMode(Game game)
+        {
+            var profile = limiterService.GetGameProfile(game);
+            return profile?.GetMode(CurrentMode).SyncMode ?? FpsSyncMode.UseGlobal;
+        }
+
+        /// <summary>Display text for a sync mode option, spelling out what "Use Global" currently resolves to.</summary>
+        private string GetSyncModeDisplayName(FpsSyncMode mode)
+        {
+            if (mode == FpsSyncMode.UseGlobal)
+            {
+                return $"Use Global Sync Mode ({FpsSyncModeNames.GetDisplayName(limiterService.GlobalSyncMode)})";
+            }
+
+            return FpsSyncModeNames.GetDisplayName(mode);
         }
 
         private PlayniteUiMode CurrentMode =>
@@ -650,16 +693,11 @@ namespace FPSLimiter
 
         private string GetSyncModeMenuText(List<Game> games, FpsSyncMode mode)
         {
-            var name = FpsSyncModeNames.GetDisplayName(mode);
-            if (games.Count == 1)
+            var name = GetSyncModeDisplayName(mode);
+
+            if (games.Count == 1 && GetSelectedSyncMode(games[0]) == mode)
             {
-                var profile = limiterService.GetGameProfile(games[0]);
-                var defaultSyncMode = CurrentMode == PlayniteUiMode.Desktop ? FpsSyncMode.FrontEdgeSync : FpsSyncMode.Async;
-                var current = profile?.GetMode(CurrentMode).SyncMode ?? defaultSyncMode;
-                if (current == mode)
-                {
-                    return $"{ActiveMenuPrefix}{name}";
-                }
+                return $"{ActiveMenuPrefix}{name}";
             }
 
             return name;

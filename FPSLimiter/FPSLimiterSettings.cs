@@ -13,6 +13,13 @@ namespace FPSLimiter
 {
     public enum FpsSyncMode
     {
+        /// <summary>
+        /// Per-game only: no sync mode of its own has been chosen, so the currently active
+        /// Global sync mode (Desktop or Fullscreen, whichever applies) is used instead. This is
+        /// the default for every new per-game profile, so a game's sync mode automatically
+        /// tracks the Global sync mode until the user explicitly overrides it for that game.
+        /// </summary>
+        UseGlobal = -1,
         Async = 0,
         FrontEdgeSync = 1,
         BackEdgeSync = 2,
@@ -25,6 +32,8 @@ namespace FPSLimiter
         {
             switch (mode)
             {
+                case FpsSyncMode.UseGlobal:
+                    return "Use Global Sync Mode";
                 case FpsSyncMode.FrontEdgeSync:
                     return "Front Edge Sync";
                 case FpsSyncMode.BackEdgeSync:
@@ -321,8 +330,8 @@ namespace FPSLimiter
     public class GameLimitProfile
     {
         public Guid GameId { get; set; }
-        public ModeLimitSettings Desktop { get; set; } = new ModeLimitSettings { SyncMode = FpsSyncMode.FrontEdgeSync };
-        public ModeLimitSettings Fullscreen { get; set; } = new ModeLimitSettings();
+        public ModeLimitSettings Desktop { get; set; } = new ModeLimitSettings { SyncMode = FpsSyncMode.UseGlobal };
+        public ModeLimitSettings Fullscreen { get; set; } = new ModeLimitSettings { SyncMode = FpsSyncMode.UseGlobal };
         public string ManualExecutablePath { get; set; }
         public string LastResolvedExecutable { get; set; }
 
@@ -330,12 +339,12 @@ namespace FPSLimiter
         {
             if (Desktop == null)
             {
-                Desktop = new ModeLimitSettings { SyncMode = FpsSyncMode.FrontEdgeSync };
+                Desktop = new ModeLimitSettings { SyncMode = FpsSyncMode.UseGlobal };
             }
 
             if (Fullscreen == null)
             {
-                Fullscreen = new ModeLimitSettings();
+                Fullscreen = new ModeLimitSettings { SyncMode = FpsSyncMode.UseGlobal };
             }
 
             return mode == PlayniteUiMode.Fullscreen ? Fullscreen : Desktop;
@@ -558,6 +567,7 @@ namespace FPSLimiter
 
         /// <summary>Options for the Global FPS limit sync-mode combo boxes (Async / Front Edge / Back Edge / Reflex).</summary>
         public List<SyncModeOption> SyncModeOptions { get; } = ((FpsSyncMode[])Enum.GetValues(typeof(FpsSyncMode)))
+            .Where(mode => mode != FpsSyncMode.UseGlobal)
             .Select(mode => new SyncModeOption { Value = mode, DisplayName = FpsSyncModeNames.GetDisplayName(mode) })
             .ToList();
 
