@@ -88,6 +88,9 @@
                     <ColumnDefinition Width="16" />
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="170" />
+                    <ColumnDefinition Width="16" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="120" />
                 </Grid.ColumnDefinitions>
 
                 <TextBlock Grid.Column="0" Text="Desktop"
@@ -114,6 +117,15 @@
                           SelectedValuePath="Value"
                           SelectedValue="{Binding Settings.GlobalDesktop.SyncMode}"
                           IsEnabled="{Binding Settings.GlobalDesktop.Enabled}" />
+                <TextBlock Grid.Column="9" Text="Reflex markers"
+                           VerticalAlignment="Center"
+                           Opacity="0.72"
+                           Margin="0,0,8,0" />
+                <ComboBox Grid.Column="10"
+                          ItemsSource="{Binding ReflexMarkerOptions}"
+                          DisplayMemberPath="DisplayName"
+                          SelectedValuePath="Value"
+                          SelectedValue="{Binding Settings.GlobalDesktop.ReflexMarkers}" />
             </Grid>
 
             <Grid Margin="0,0,0,16">
@@ -126,6 +138,9 @@
                     <ColumnDefinition Width="16" />
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="170" />
+                    <ColumnDefinition Width="16" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="120" />
                 </Grid.ColumnDefinitions>
 
                 <TextBlock Grid.Column="0" Text="Fullscreen"
@@ -152,6 +167,15 @@
                           SelectedValuePath="Value"
                           SelectedValue="{Binding Settings.GlobalFullscreen.SyncMode}"
                           IsEnabled="{Binding Settings.GlobalFullscreen.Enabled}" />
+                <TextBlock Grid.Column="9" Text="Reflex markers"
+                           VerticalAlignment="Center"
+                           Opacity="0.72"
+                           Margin="0,0,8,0" />
+                <ComboBox Grid.Column="10"
+                          ItemsSource="{Binding ReflexMarkerOptions}"
+                          DisplayMemberPath="DisplayName"
+                          SelectedValuePath="Value"
+                          SelectedValue="{Binding Settings.GlobalFullscreen.ReflexMarkers}" />
             </Grid>
 
             <TextBlock TextWrapping="Wrap"
@@ -159,7 +183,11 @@
                        Margin="0,0,0,16">
                 <Run Text="Each game's right-click menu also has its own" />
                 <Run Text=" Sync mode" FontWeight="SemiBold" />
-                <Run Text=" submenu (Async / Front Edge Sync / Back Edge Sync / NVIDIA Reflex) that overrides the global one for that game." />
+                <Run Text=" and " />
+                <Run Text="Reflex markers" FontWeight="SemiBold" />
+                <Run Text=" submenus that override the global ones for that game. RTSS enables Reflex latency marker injection by default on every profile; &quot;Disabled&quot; here writes that override into the RTSS profile file. This is separate from the" />
+                <Run Text=" NVIDIA Reflex" FontWeight="SemiBold" />
+                <Run Text=" sync mode option above, which controls RTSS's Reflex framerate limiter instead." />
             </TextBlock>
 
             <TextBlock Text="VRR-safe FPS cap"

@@ -46,6 +46,39 @@ namespace FPSLimiter
         }
     }
 
+    /// <summary>
+    /// Controls RTSS's "Inject NVIDIA Reflex latency markers" profile option, which RTSS enables
+    /// by default on every profile. This is independent of <see cref="FpsSyncMode.ReflexSync"/>
+    /// (the framerate limiter mode); it's the separate marker-injection option used for latency
+    /// measurement/overlay purposes.
+    /// </summary>
+    public enum ReflexMarkerMode
+    {
+        /// <summary>
+        /// Per-game only: no explicit choice has been made for this game, so the currently active
+        /// Global Reflex marker setting (Desktop or Fullscreen, whichever applies) is used instead.
+        /// </summary>
+        UseGlobal = -1,
+        Enabled = 0,
+        Disabled = 1
+    }
+
+    public static class ReflexMarkerModeNames
+    {
+        public static string GetDisplayName(ReflexMarkerMode mode)
+        {
+            switch (mode)
+            {
+                case ReflexMarkerMode.UseGlobal:
+                    return "Use Global Setting";
+                case ReflexMarkerMode.Disabled:
+                    return "Disabled";
+                default:
+                    return "Enabled";
+            }
+        }
+    }
+
     public enum PlayniteUiMode
     {
         Desktop = 0,
@@ -58,6 +91,7 @@ namespace FPSLimiter
         private double frameLimit = 0;
         private string frameLimitText = FormatFrameLimit(0);
         private FpsSyncMode syncMode = FpsSyncMode.Async;
+        private ReflexMarkerMode reflexMarkers = ReflexMarkerMode.Enabled;
 
         public bool Enabled
         {
@@ -119,6 +153,16 @@ namespace FPSLimiter
         {
             get => syncMode;
             set => SetValue(ref syncMode, value);
+        }
+
+        /// <summary>
+        /// Whether RTSS should inject NVIDIA Reflex latency markers for this profile. RTSS enables
+        /// this by default; set to <see cref="ReflexMarkerMode.Disabled"/> to turn it off.
+        /// </summary>
+        public ReflexMarkerMode ReflexMarkers
+        {
+            get => reflexMarkers;
+            set => SetValue(ref reflexMarkers, value);
         }
 
         private static string FormatFrameLimit(double value)
@@ -330,8 +374,8 @@ namespace FPSLimiter
     public class GameLimitProfile
     {
         public Guid GameId { get; set; }
-        public ModeLimitSettings Desktop { get; set; } = new ModeLimitSettings { SyncMode = FpsSyncMode.UseGlobal };
-        public ModeLimitSettings Fullscreen { get; set; } = new ModeLimitSettings { SyncMode = FpsSyncMode.UseGlobal };
+        public ModeLimitSettings Desktop { get; set; } = new ModeLimitSettings { SyncMode = FpsSyncMode.UseGlobal, ReflexMarkers = ReflexMarkerMode.UseGlobal };
+        public ModeLimitSettings Fullscreen { get; set; } = new ModeLimitSettings { SyncMode = FpsSyncMode.UseGlobal, ReflexMarkers = ReflexMarkerMode.UseGlobal };
         public string ManualExecutablePath { get; set; }
         public string LastResolvedExecutable { get; set; }
 
@@ -339,12 +383,12 @@ namespace FPSLimiter
         {
             if (Desktop == null)
             {
-                Desktop = new ModeLimitSettings { SyncMode = FpsSyncMode.UseGlobal };
+                Desktop = new ModeLimitSettings { SyncMode = FpsSyncMode.UseGlobal, ReflexMarkers = ReflexMarkerMode.UseGlobal };
             }
 
             if (Fullscreen == null)
             {
-                Fullscreen = new ModeLimitSettings { SyncMode = FpsSyncMode.UseGlobal };
+                Fullscreen = new ModeLimitSettings { SyncMode = FpsSyncMode.UseGlobal, ReflexMarkers = ReflexMarkerMode.UseGlobal };
             }
 
             return mode == PlayniteUiMode.Fullscreen ? Fullscreen : Desktop;
@@ -364,6 +408,7 @@ namespace FPSLimiter
         public string ProfileName { get; set; }
         public double AppliedLimit { get; set; }
         public FpsSyncMode AppliedSyncMode { get; set; }
+        public bool AppliedReflexMarkersDisabled { get; set; }
         public bool UsesGlobalProfile { get; set; }
         public bool ProfileExisted { get; set; }
         public bool OriginalLimitAvailable { get; set; }
@@ -549,6 +594,13 @@ namespace FPSLimiter
         public string DisplayName { get; set; }
     }
 
+    /// <summary>Display-friendly wrapper for a ReflexMarkerMode value, used by settings-page combo boxes.</summary>
+    public class ReflexMarkerOption
+    {
+        public ReflexMarkerMode Value { get; set; }
+        public string DisplayName { get; set; }
+    }
+
     public class FPSLimiterSettingsViewModel : ObservableObject, ISettings
     {
         private readonly FPSLimiter plugin;
@@ -569,6 +621,12 @@ namespace FPSLimiter
         public List<SyncModeOption> SyncModeOptions { get; } = ((FpsSyncMode[])Enum.GetValues(typeof(FpsSyncMode)))
             .Where(mode => mode != FpsSyncMode.UseGlobal)
             .Select(mode => new SyncModeOption { Value = mode, DisplayName = FpsSyncModeNames.GetDisplayName(mode) })
+            .ToList();
+
+        /// <summary>Options for the Global Reflex marker injection combo boxes (Enabled / Disabled).</summary>
+        public List<ReflexMarkerOption> ReflexMarkerOptions { get; } = ((ReflexMarkerMode[])Enum.GetValues(typeof(ReflexMarkerMode)))
+            .Where(mode => mode != ReflexMarkerMode.UseGlobal)
+            .Select(mode => new ReflexMarkerOption { Value = mode, DisplayName = ReflexMarkerModeNames.GetDisplayName(mode) })
             .ToList();
 
         private double vrrSafeCapValue;

@@ -39,6 +39,22 @@ namespace FPSLimiter
             FpsSyncMode.ReflexSync
         };
 
+        // Used for the Global Reflex marker injection menu, which has no parent to fall back to.
+        private static readonly ReflexMarkerMode[] ReflexMarkerModes =
+        {
+            ReflexMarkerMode.Enabled,
+            ReflexMarkerMode.Disabled
+        };
+
+        // Used for per-game Reflex marker injection menus, which can also track whichever Global
+        // setting is currently active instead of a fixed choice.
+        private static readonly ReflexMarkerMode[] GameReflexMarkerModes =
+        {
+            ReflexMarkerMode.UseGlobal,
+            ReflexMarkerMode.Enabled,
+            ReflexMarkerMode.Disabled
+        };
+
         private FPSLimiterSettingsViewModel settings;
         private LimiterService limiterService;
         private HotkeyManager hotkeyManager;
@@ -388,6 +404,16 @@ namespace FPSLimiter
                 };
             }
 
+            foreach (var mode in GameReflexMarkerModes)
+            {
+                yield return new GameMenuItem
+                {
+                    MenuSection = $"{menuRoot}|Reflex markers",
+                    Description = GetReflexMarkerMenuText(games, mode),
+                    Action = _ => limiterService.SetGameReflexMarkers(games, mode)
+                };
+            }
+
             if (PlayniteApi.ApplicationInfo.Mode != ApplicationMode.Desktop)
             {
                 yield break;
@@ -444,6 +470,16 @@ namespace FPSLimiter
                     MenuSection = $"{menuRoot}|Global sync mode",
                     Description = GetGlobalSyncModeMenuText(mode),
                     Action = _ => limiterService.SetGlobalSyncMode(mode)
+                };
+            }
+
+            foreach (var mode in ReflexMarkerModes)
+            {
+                yield return new MainMenuItem
+                {
+                    MenuSection = $"{menuRoot}|Global Reflex markers",
+                    Description = GetGlobalReflexMarkerMenuText(mode),
+                    Action = _ => limiterService.SetGlobalReflexMarkers(mode)
                 };
             }
 
@@ -651,6 +687,24 @@ namespace FPSLimiter
             return FpsSyncModeNames.GetDisplayName(mode);
         }
 
+        /// <summary>The Reflex marker setting currently stored on the game's profile (UseGlobal if none set yet).</summary>
+        private ReflexMarkerMode GetSelectedReflexMarkers(Game game)
+        {
+            var profile = limiterService.GetGameProfile(game);
+            return profile?.GetMode(CurrentMode).ReflexMarkers ?? ReflexMarkerMode.UseGlobal;
+        }
+
+        /// <summary>Display text for a Reflex marker option, spelling out what "Use Global" currently resolves to.</summary>
+        private string GetReflexMarkerDisplayName(ReflexMarkerMode mode)
+        {
+            if (mode == ReflexMarkerMode.UseGlobal)
+            {
+                return $"Use Global Setting ({ReflexMarkerModeNames.GetDisplayName(limiterService.GlobalReflexMarkers)})";
+            }
+
+            return ReflexMarkerModeNames.GetDisplayName(mode);
+        }
+
         private PlayniteUiMode CurrentMode =>
             PlayniteApi.ApplicationInfo.Mode == ApplicationMode.Fullscreen
                 ? PlayniteUiMode.Fullscreen
@@ -775,6 +829,18 @@ namespace FPSLimiter
             return name;
         }
 
+        private string GetReflexMarkerMenuText(List<Game> games, ReflexMarkerMode mode)
+        {
+            var name = GetReflexMarkerDisplayName(mode);
+
+            if (games.Count == 1 && GetSelectedReflexMarkers(games[0]) == mode)
+            {
+                return $"{ActiveMenuPrefix}{name}";
+            }
+
+            return name;
+        }
+
         private string GetGlobalPresetMenuText(double preset)
         {
             var presetText = FormatFps(preset);
@@ -821,6 +887,12 @@ namespace FPSLimiter
         {
             var name = FpsSyncModeNames.GetDisplayName(mode);
             return limiterService.GlobalSyncMode == mode ? $"{ActiveMenuPrefix}{name}" : name;
+        }
+
+        private string GetGlobalReflexMarkerMenuText(ReflexMarkerMode mode)
+        {
+            var name = ReflexMarkerModeNames.GetDisplayName(mode);
+            return limiterService.GlobalReflexMarkers == mode ? $"{ActiveMenuPrefix}{name}" : name;
         }
 
     }

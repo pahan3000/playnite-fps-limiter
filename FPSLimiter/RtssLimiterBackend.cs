@@ -214,7 +214,7 @@ namespace FPSLimiter
             }
         }
 
-        public LimitSessionSnapshot ApplyLimit(Guid gameId, string gameName, string executablePath, double frameLimit, FpsSyncMode syncMode, bool forceGlobalProfile)
+        public LimitSessionSnapshot ApplyLimit(Guid gameId, string gameName, string executablePath, double frameLimit, FpsSyncMode syncMode, bool forceGlobalProfile, bool disableReflexMarkers = false)
         {
             var rtssPath = ResolveRtssPath();
             if (string.IsNullOrWhiteSpace(rtssPath))
@@ -237,10 +237,10 @@ namespace FPSLimiter
 
             try
             {
-                ApplyProfileFileLimit(rtssPath, apiProfileName, frameLimit, syncMode);
+                ApplyProfileFileLimit(rtssPath, apiProfileName, frameLimit, syncMode, disableReflexMarkers);
                 RefreshRtssProfiles(rtssPath);
                 var fileLimit = ReadProfileFileLimit(rtssPath, apiProfileName);
-                logger.Info($"RTSS profile file {profileName} after apply: Limit={FormatFileReadback(fileLimit)}, Sync={syncMode}.");
+                logger.Info($"RTSS profile file {profileName} after apply: Limit={FormatFileReadback(fileLimit)}, Sync={syncMode}, ReflexMarkersDisabled={disableReflexMarkers}.");
 
                 if (!fileLimit.HasValue || Math.Abs(fileLimit.Value - frameLimit) > 0.01)
                 {
@@ -260,6 +260,7 @@ namespace FPSLimiter
                 ProfileName = profileName,
                 AppliedLimit = frameLimit,
                 AppliedSyncMode = syncMode,
+                AppliedReflexMarkersDisabled = disableReflexMarkers,
                 UsesGlobalProfile = usesGlobalProfile,
                 ProfileExisted = profileExisted,
                 FileFallbackUsed = true,
@@ -360,7 +361,14 @@ namespace FPSLimiter
             };
         }
 
-        private static void ApplyProfileFileLimit(string rtssPath, string apiProfileName, double frameLimit, FpsSyncMode syncMode)
+        // RTSS profile key used for the "Inject NVIDIA Reflex latency markers" checkbox in RTSS's
+        // own Setup dialog (Injection properties). Confirmed by diffing a real RTSS profile .cfg
+        // file: it's ReflexSetLatencyMarker under [Framerate], 1 = enabled (RTSS's default), 0 =
+        // disabled.
+        private const string ReflexMarkersSection = "Framerate";
+        private const string ReflexMarkersKey = "ReflexSetLatencyMarker";
+
+        private static void ApplyProfileFileLimit(string rtssPath, string apiProfileName, double frameLimit, FpsSyncMode syncMode, bool disableReflexMarkers)
         {
             var path = GetProfileFilePath(rtssPath, apiProfileName);
             var profileText = File.Exists(path)
@@ -375,6 +383,7 @@ namespace FPSLimiter
             profileText = SetProfileValue(profileText, "Framerate", "LimitDenominator", denominator.ToString(CultureInfo.InvariantCulture));
             profileText = SetProfileValue(profileText, "Framerate", "SyncLimiter", ((int)syncMode).ToString());
             profileText = SetProfileValue(profileText, "Hooking", "EnableHooking", "1");
+            profileText = SetProfileValue(profileText, ReflexMarkersSection, ReflexMarkersKey, disableReflexMarkers ? "0" : "1");
 
             File.WriteAllText(path, profileText, Encoding.Default);
         }

@@ -56,6 +56,8 @@ namespace FPSLimiter
 
         public FpsSyncMode GlobalSyncMode => Settings.GetGlobal(CurrentMode).SyncMode;
 
+        public ReflexMarkerMode GlobalReflexMarkers => Settings.GetGlobal(CurrentMode).ReflexMarkers;
+
         public void SetGlobalLimit(double frameLimit)
         {
             var global = Settings.GetGlobal(CurrentMode);
@@ -75,6 +77,12 @@ namespace FPSLimiter
         public void SetGlobalSyncMode(FpsSyncMode syncMode)
         {
             Settings.GetGlobal(CurrentMode).SyncMode = syncMode;
+            settingsViewModel.SaveSettings();
+        }
+
+        public void SetGlobalReflexMarkers(ReflexMarkerMode mode)
+        {
+            Settings.GetGlobal(CurrentMode).ReflexMarkers = mode;
             settingsViewModel.SaveSettings();
         }
 
@@ -103,6 +111,28 @@ namespace FPSLimiter
         {
             var profile = GetGameProfile(game);
             return ResolveEffectiveSyncMode(profile?.GetMode(CurrentMode), CurrentMode);
+        }
+
+        /// <summary>
+        /// Resolves the Reflex marker setting a per-game ModeLimitSettings actually applies: its own
+        /// explicit choice, or the current Global Reflex marker setting (for the same Playnite UI
+        /// mode) when the game is left on <see cref="ReflexMarkerMode.UseGlobal"/>.
+        /// </summary>
+        private ReflexMarkerMode ResolveEffectiveReflexMarkers(ModeLimitSettings modeLimit, PlayniteUiMode mode)
+        {
+            if (modeLimit != null && modeLimit.ReflexMarkers != ReflexMarkerMode.UseGlobal)
+            {
+                return modeLimit.ReflexMarkers;
+            }
+
+            return Settings.GetGlobal(mode).ReflexMarkers;
+        }
+
+        /// <summary>The Reflex marker setting a single game will actually apply right now, resolving "Use Global" if set.</summary>
+        public ReflexMarkerMode GetEffectiveGameReflexMarkers(Game game)
+        {
+            var profile = GetGameProfile(game);
+            return ResolveEffectiveReflexMarkers(profile?.GetMode(CurrentMode), CurrentMode);
         }
 
         /// <summary>Whether the VRR low-fps refresh-rate switch is currently enabled.</summary>
@@ -159,6 +189,23 @@ namespace FPSLimiter
             {
                 var profile = Settings.GetOrCreateGameProfile(game.Id);
                 profile.GetMode(CurrentMode).SyncMode = syncMode;
+            }
+
+            settingsViewModel.SaveSettings();
+
+            foreach (var game in gameList)
+            {
+                ReapplyIfRunning(game);
+            }
+        }
+
+        public void SetGameReflexMarkers(IEnumerable<Game> games, ReflexMarkerMode mode)
+        {
+            var gameList = games.ToList();
+            foreach (var game in gameList)
+            {
+                var profile = Settings.GetOrCreateGameProfile(game.Id);
+                profile.GetMode(CurrentMode).ReflexMarkers = mode;
             }
 
             settingsViewModel.SaveSettings();
@@ -244,6 +291,8 @@ namespace FPSLimiter
 
             var frameLimit = hasGameProfile ? modeLimit.FrameLimit : globalForMode.FrameLimit;
             var syncMode = hasGameProfile ? ResolveEffectiveSyncMode(modeLimit, CurrentMode) : globalForMode.SyncMode;
+            var reflexMarkers = hasGameProfile ? ResolveEffectiveReflexMarkers(modeLimit, CurrentMode) : globalForMode.ReflexMarkers;
+            var disableReflexMarkers = reflexMarkers == ReflexMarkerMode.Disabled;
             var forceGlobalProfile = useGlobalFallback || Settings.UseGlobalProfileDuringLaunch;
 
             string target = null;
@@ -269,7 +318,8 @@ namespace FPSLimiter
             {
                 if (string.Equals(existingSession.ProfileName, profileName, StringComparison.OrdinalIgnoreCase) &&
                     existingSession.AppliedLimit == frameLimit &&
-                    existingSession.AppliedSyncMode == syncMode)
+                    existingSession.AppliedSyncMode == syncMode &&
+                    existingSession.AppliedReflexMarkersDisabled == disableReflexMarkers)
                 {
                     if (hasGameProfile && !string.IsNullOrWhiteSpace(target))
                     {
@@ -285,7 +335,7 @@ namespace FPSLimiter
 
             try
             {
-                var session = rtssBackend.ApplyLimit(game.Id, game.Name, target, frameLimit, syncMode, forceGlobalProfile);
+                var session = rtssBackend.ApplyLimit(game.Id, game.Name, target, frameLimit, syncMode, forceGlobalProfile, disableReflexMarkers);
                 Settings.ActiveSessions.RemoveAll(a => a.GameId == game.Id);
 
                 // Switch display refresh rate when capping to a low FPS target
@@ -442,7 +492,8 @@ namespace FPSLimiter
                 }
 
                 var syncMode = ResolveEffectiveSyncMode(modeLimit, CurrentMode);
-                var session = rtssBackend.ApplyLimit(game.Id, game.Name, actualTarget, modeLimit.FrameLimit, syncMode, false);
+                var disableReflexMarkers = ResolveEffectiveReflexMarkers(modeLimit, CurrentMode) == ReflexMarkerMode.Disabled;
+                var session = rtssBackend.ApplyLimit(game.Id, game.Name, actualTarget, modeLimit.FrameLimit, syncMode, false, disableReflexMarkers);
                 Settings.ActiveSessions.RemoveAll(a => a.GameId == game.Id);
 
                 TrySwitchRefreshRateForCap(session, modeLimit.FrameLimit);
