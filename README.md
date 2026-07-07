@@ -10,6 +10,8 @@ This is a fork of [mjd4219/playnite-fps-limiter](https://github.com/mjd4219/play
 - **Sync mode from the top panel button**: the top panel button's picker now includes a "Sync mode" entry, matching the right-click menu.
 - **Global hotkeys**: assign a keyboard shortcut (in settings) to instantly apply an FPS cap, or disable one, on whichever game is currently running. Works even while a game has focus.
 
+*AI ASSISTED
+
 FPS Limiter is a Playnite extension for setting per-game framerate caps when launching games through Playnite. It is mainly intended for PC games, but it can also be used with emulated games or custom entries imported into Playnite.
 
 It uses RivaTuner Statistics Server (RTSS) to apply the cap. The cap is applied when Playnite launches the game and the previous RTSS profile state is restored when Playnite detects that the game has stopped, so the setting is intended to affect Playnite launches rather than permanently changing the game.
