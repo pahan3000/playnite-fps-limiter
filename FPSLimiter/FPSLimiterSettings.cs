@@ -185,15 +185,6 @@ namespace FPSLimiter
         private ObservableCollection<HotkeyBinding> hotkeys = new ObservableCollection<HotkeyBinding>();
         private DateTime lastUpdateCheckUtc = DateTime.MinValue;
 
-        // VRR refresh-rate switching
-        private bool vrrRefreshRateEnabled = false;
-        private int vrrTargetHz = 48;
-        private double vrrFpsThreshold = 40;
-
-        // Non-VRR refresh-rate matching (refresh rate set to a multiple of the FPS cap)
-        private bool matchRefreshRateEnabled = false;
-        private int matchRefreshRateMaxMultiplier = 4;
-
         public string RtssPath
         {
             get => rtssPath;
@@ -264,52 +255,6 @@ namespace FPSLimiter
         {
             get => hotkeys ?? (hotkeys = new ObservableCollection<HotkeyBinding>());
             set => SetValue(ref hotkeys, value ?? new ObservableCollection<HotkeyBinding>());
-        }
-
-        /// <summary>
-        /// When true, the display refresh rate is switched to <see cref="VrrTargetHz"/> whenever
-        /// an FPS cap at or below <see cref="VrrFpsThreshold"/> is applied, and restored on game stop.
-        /// </summary>
-        public bool VrrRefreshRateEnabled
-        {
-            get => vrrRefreshRateEnabled;
-            set => SetValue(ref vrrRefreshRateEnabled, value);
-        }
-
-        /// <summary>Refresh rate (Hz) to switch to when the VRR low-fps cap is active.</summary>
-        public int VrrTargetHz
-        {
-            get => vrrTargetHz;
-            set => SetValue(ref vrrTargetHz, value);
-        }
-
-        /// <summary>FPS caps at or below this value trigger the refresh-rate switch.</summary>
-        public double VrrFpsThreshold
-        {
-            get => vrrFpsThreshold;
-            set => SetValue(ref vrrFpsThreshold, value);
-        }
-
-        /// <summary>
-        /// When true (and <see cref="VrrRefreshRateEnabled"/> is false), the display refresh rate
-        /// is automatically switched to a whole multiple of the active FPS cap whenever a cap is
-        /// applied (e.g. 30 FPS -> 60 Hz, 36 FPS -> 72 Hz), and restored on game stop. This keeps
-        /// frame pacing even on displays without VRR.
-        /// </summary>
-        public bool MatchRefreshRateEnabled
-        {
-            get => matchRefreshRateEnabled;
-            set => SetValue(ref matchRefreshRateEnabled, value);
-        }
-
-        /// <summary>
-        /// Highest multiplier of the FPS cap to try when looking for a supported refresh rate
-        /// (2x is tried first, then 3x, 4x, ... up to this value).
-        /// </summary>
-        public int MatchRefreshRateMaxMultiplier
-        {
-            get => matchRefreshRateMaxMultiplier;
-            set => SetValue(ref matchRefreshRateMaxMultiplier, value);
         }
 
         public List<double> GetPresetValues()
@@ -421,10 +366,6 @@ namespace FPSLimiter
         public string OriginalProfileFileContent { get; set; }
         public bool StartedRtssProcess { get; set; }
         public DateTime StartedAt { get; set; }
-
-        // VRR refresh rate tracking
-        public bool RefreshRateChanged { get; set; }
-        public int OriginalRefreshRate { get; set; }
     }
 
     /// <summary>

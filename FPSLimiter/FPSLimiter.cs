@@ -575,9 +575,6 @@ namespace FPSLimiter
             var syncModeOption = new GenericItemOption(GetTopPanelSyncModeMenuText(games), "Sync mode");
             options.Add(syncModeOption);
 
-            var vrrOption = new GenericItemOption(GetVrrToggleMenuText(), "VRR refresh-rate switching");
-            options.Add(vrrOption);
-
             var caption = games.Count == 1
                 ? $"FPS Limiter - {games[0].Name}"
                 : $"FPS Limiter - {games.Count} games selected";
@@ -611,24 +608,11 @@ namespace FPSLimiter
                 return;
             }
 
-            if (ReferenceEquals(selected, vrrOption))
-            {
-                limiterService.ToggleVrrRefreshRateEnabled();
-                return;
-            }
-
             var index = options.IndexOf(selected);
             if (index >= 0 && index < presetList.Count)
             {
                 limiterService.SetGameLimit(games, presetList[index]);
             }
-        }
-
-        private string GetVrrToggleMenuText()
-        {
-            var state = limiterService.VrrRefreshRateEnabled ? "On" : "Off";
-            var prefix = limiterService.VrrRefreshRateEnabled ? ActiveMenuPrefix : string.Empty;
-            return $"{prefix}VRR refresh-rate switching: {state}";
         }
 
         private void ShowTopPanelSyncModeMenu(List<Game> games)

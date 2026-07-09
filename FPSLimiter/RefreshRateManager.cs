@@ -1,6 +1,5 @@
 using Playnite.SDK;
 using System;
-using System.Collections.Generic;
 using System.Runtime.InteropServices;
 
 namespace FPSLimiter
@@ -54,14 +53,7 @@ namespace FPSLimiter
         [DllImport("user32.dll", CharSet = CharSet.Ansi)]
         private static extern bool EnumDisplaySettings(string lpszDeviceName, int iModeNum, ref DEVMODE lpDevMode);
 
-        [DllImport("user32.dll", CharSet = CharSet.Ansi)]
-        private static extern int ChangeDisplaySettingsEx(string lpszDeviceName, ref DEVMODE lpDevMode, IntPtr hwnd, uint dwflags, IntPtr lParam);
-
         private const int ENUM_CURRENT_SETTINGS = -1;
-        private const int DM_DISPLAYFREQUENCY = 0x400000;
-        private const int DISP_CHANGE_SUCCESSFUL = 0;
-        private const uint CDS_UPDATEREGISTRY = 0x01;
-        private const uint CDS_NORESET = 0x10000000;
 
         // ── Public API ───────────────────────────────────────────────────────
 
@@ -78,111 +70,6 @@ namespace FPSLimiter
             return 0;
         }
 
-        /// <summary>
-        /// Sets the primary display refresh rate.
-        /// </summary>
-        /// <param name="hz">Target refresh rate in Hz.</param>
-        /// <returns>True on success.</returns>
-        public static bool SetRefreshRate(int hz)
-        {
-            var dm = new DEVMODE();
-            dm.dmSize = (short)Marshal.SizeOf(dm);
-
-            if (!EnumDisplaySettings(null, ENUM_CURRENT_SETTINGS, ref dm))
-            {
-                logger.Error("RefreshRateManager: EnumDisplaySettings failed.");
-                return false;
-            }
-
-            if (dm.dmDisplayFrequency == hz)
-            {
-                logger.Info($"RefreshRateManager: Already at {hz} Hz, nothing to do.");
-                return true;
-            }
-
-            dm.dmDisplayFrequency = hz;
-            dm.dmFields = DM_DISPLAYFREQUENCY;
-
-            int result = ChangeDisplaySettingsEx(null, ref dm, IntPtr.Zero, CDS_UPDATEREGISTRY, IntPtr.Zero);
-            if (result == DISP_CHANGE_SUCCESSFUL)
-            {
-                logger.Info($"RefreshRateManager: Switched to {hz} Hz.");
-                return true;
-            }
-
-            logger.Error($"RefreshRateManager: ChangeDisplaySettingsEx returned {result} when trying {hz} Hz.");
-            return false;
-        }
-
-        /// <summary>
-        /// Returns the distinct refresh rates (Hz) the primary display supports at its current
-        /// resolution and color depth.
-        /// </summary>
-        public static List<int> GetSupportedRefreshRates()
-        {
-            var rates = new List<int>();
-
-            var current = new DEVMODE();
-            current.dmSize = (short)Marshal.SizeOf(current);
-            if (!EnumDisplaySettings(null, ENUM_CURRENT_SETTINGS, ref current))
-            {
-                logger.Error("RefreshRateManager: EnumDisplaySettings (current mode) failed.");
-                return rates;
-            }
-
-            var dm = new DEVMODE();
-            dm.dmSize = (short)Marshal.SizeOf(dm);
-
-            int modeNum = 0;
-            while (EnumDisplaySettings(null, modeNum, ref dm))
-            {
-                if (dm.dmPelsWidth == current.dmPelsWidth &&
-                    dm.dmPelsHeight == current.dmPelsHeight &&
-                    dm.dmBitsPerPel == current.dmBitsPerPel &&
-                    dm.dmDisplayFrequency > 1 &&
-                    !rates.Contains(dm.dmDisplayFrequency))
-                {
-                    rates.Add(dm.dmDisplayFrequency);
-                }
-
-                modeNum++;
-            }
-
-            rates.Sort();
-            return rates;
-        }
-
-        /// <summary>
-        /// Finds the best display refresh rate that the FPS cap divides evenly into, so every
-        /// rendered frame gets the same number of display refreshes (no judder on non-VRR
-        /// displays). Tries 2x the cap first, then 3x, 4x, ... up to <paramref name="maxMultiplier"/>,
-        /// and finally falls back to a 1x match (refresh rate == cap). Returns 0 if the display
-        /// doesn't support any matching mode.
-        /// </summary>
-        public static int FindMatchingRefreshRate(int fps, int maxMultiplier = 4)
-        {
-            if (fps <= 0)
-            {
-                return 0;
-            }
-
-            var supported = GetSupportedRefreshRates();
-            if (supported.Count == 0)
-            {
-                return 0;
-            }
-
-            for (int multiplier = 2; multiplier <= maxMultiplier; multiplier++)
-            {
-                int candidate = fps * multiplier;
-                if (supported.Contains(candidate))
-                {
-                    return candidate;
-                }
-            }
-
-            return supported.Contains(fps) ? fps : 0;
-        }
         /// <summary>
         /// Blur Busters' recommended safe FPS cap for VRR (G-Sync/FreeSync) displays: comfortably
         /// under the panel's max refresh rate so frame delivery never outruns the VRR window, which

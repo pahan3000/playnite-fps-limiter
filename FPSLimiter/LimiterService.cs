@@ -135,16 +135,6 @@ namespace FPSLimiter
             return ResolveEffectiveReflexMarkers(profile?.GetMode(CurrentMode), CurrentMode);
         }
 
-        /// <summary>Whether the VRR low-fps refresh-rate switch is currently enabled.</summary>
-        public bool VrrRefreshRateEnabled => Settings.VrrRefreshRateEnabled;
-
-        /// <summary>Toggles VRR low-fps refresh-rate switching on/off, e.g. from the top bar button.</summary>
-        public void ToggleVrrRefreshRateEnabled()
-        {
-            Settings.VrrRefreshRateEnabled = !Settings.VrrRefreshRateEnabled;
-            settingsViewModel.SaveSettings();
-        }
-
         /// <summary>Marks a game as currently running. Call once the game process has actually started.</summary>
         public void NotifyGameStarted(Guid gameId)
         {
@@ -338,9 +328,6 @@ namespace FPSLimiter
                 var session = rtssBackend.ApplyLimit(game.Id, game.Name, target, frameLimit, syncMode, forceGlobalProfile, disableReflexMarkers);
                 Settings.ActiveSessions.RemoveAll(a => a.GameId == game.Id);
 
-                // Switch display refresh rate when capping to a low FPS target
-                TrySwitchRefreshRateForCap(session, frameLimit);
-
                 Settings.ActiveSessions.Add(session);
                 if (hasGameProfile && !string.IsNullOrWhiteSpace(target))
                 {
@@ -496,8 +483,6 @@ namespace FPSLimiter
                 var session = rtssBackend.ApplyLimit(game.Id, game.Name, actualTarget, modeLimit.FrameLimit, syncMode, false, disableReflexMarkers);
                 Settings.ActiveSessions.RemoveAll(a => a.GameId == game.Id);
 
-                TrySwitchRefreshRateForCap(session, modeLimit.FrameLimit);
-
                 Settings.ActiveSessions.Add(session);
                 profile.LastResolvedExecutable = actualTarget;
 
@@ -533,76 +518,6 @@ namespace FPSLimiter
             }
         }
 
-        private void TrySwitchRefreshRateForCap(LimitSessionSnapshot session, double frameLimit)
-        {
-            if (Settings.VrrRefreshRateEnabled)
-            {
-                TrySwitchToFixedRefreshRate(session, frameLimit);
-            }
-            else if (Settings.MatchRefreshRateEnabled)
-            {
-                TrySwitchToMatchingRefreshRate(session, frameLimit);
-            }
-        }
-
-        private void TrySwitchToFixedRefreshRate(LimitSessionSnapshot session, double frameLimit)
-        {
-            if (frameLimit <= 0 || frameLimit > Settings.VrrFpsThreshold)
-            {
-                return;
-            }
-
-            var current = RefreshRateManager.GetCurrentRefreshRate();
-            if (current <= 0 || current == Settings.VrrTargetHz)
-            {
-                return;
-            }
-
-            if (RefreshRateManager.SetRefreshRate(Settings.VrrTargetHz))
-            {
-                session.RefreshRateChanged = true;
-                session.OriginalRefreshRate = current;
-                logger.Info($"Switched display to {Settings.VrrTargetHz} Hz for {frameLimit} FPS cap on {session.GameName} (was {current} Hz).");
-            }
-            else
-            {
-                logger.Warn($"Could not switch display to {Settings.VrrTargetHz} Hz for {session.GameName}.");
-            }
-        }
-
-        private void TrySwitchToMatchingRefreshRate(LimitSessionSnapshot session, double frameLimit)
-        {
-            if (frameLimit <= 0)
-            {
-                return;
-            }
-
-            var fps = (int)Math.Round(frameLimit);
-            var target = RefreshRateManager.FindMatchingRefreshRate(fps, Settings.MatchRefreshRateMaxMultiplier);
-            if (target <= 0)
-            {
-                logger.Info($"No supported refresh rate is a clean multiple of {fps} FPS for {session.GameName}; leaving display rate unchanged.");
-                return;
-            }
-
-            var current = RefreshRateManager.GetCurrentRefreshRate();
-            if (current <= 0 || current == target)
-            {
-                return;
-            }
-
-            if (RefreshRateManager.SetRefreshRate(target))
-            {
-                session.RefreshRateChanged = true;
-                session.OriginalRefreshRate = current;
-                logger.Info($"Matched display to {target} Hz for {fps} FPS cap on {session.GameName} (was {current} Hz).");
-            }
-            else
-            {
-                logger.Warn($"Could not switch display to {target} Hz for {session.GameName}.");
-            }
-        }
-
         private void RestoreSession(LimitSessionSnapshot snapshot, bool showError)
         {
             RestoreSession(snapshot, showError, false);
@@ -615,19 +530,6 @@ namespace FPSLimiter
                 rtssBackend.RestoreLimit(snapshot);
                 Settings.ActiveSessions.RemoveAll(a => a.GameId == snapshot.GameId && string.Equals(a.ProfileName, snapshot.ProfileName, StringComparison.OrdinalIgnoreCase));
                 logger.Info($"Restored RTSS profile {snapshot.ProfileName} after {snapshot.GameName}.");
-
-                // Restore display refresh rate if we changed it for this session
-                if (snapshot.RefreshRateChanged && snapshot.OriginalRefreshRate > 0)
-                {
-                    if (RefreshRateManager.SetRefreshRate(snapshot.OriginalRefreshRate))
-                    {
-                        logger.Info($"Restored display refresh rate to {snapshot.OriginalRefreshRate} Hz after {snapshot.GameName}.");
-                    }
-                    else
-                    {
-                        logger.Warn($"Failed to restore display refresh rate to {snapshot.OriginalRefreshRate} Hz after {snapshot.GameName}.");
-                    }
-                }
 
                 // When this restore is immediately followed by re-applying a new limit (e.g. a live
                 // cap change while the game is still running), skip the "no caps left, close RTSS"
