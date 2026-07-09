@@ -3,8 +3,8 @@ This is a fork of [mjd4219/playnite-fps-limiter](https://github.com/mjd4219/play
 - **Separate Desktop / Fullscreen profiles** per game and for the global cap, instead of one shared setting.
 - **Sync mode control** (Async / Front Edge Sync / Reflex)
 - **Global FPS limit** 
-- **Hotkey Support
-- **VRR cap
+- **Hotkey Support**
+- **VRR cap**
 *AI ASSISTED
 
 FPS Limiter is a Playnite extension for setting per-game framerate caps when launching games through Playnite. It is mainly intended for PC games, but it can also be used with emulated games or custom entries imported into Playnite.
