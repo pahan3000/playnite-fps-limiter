@@ -1,7 +1,7 @@
 This is a fork of [mjd4219/playnite-fps-limiter](https://github.com/mjd4219/playnite-fps-limiter) with several additions on top of the original, such as:
 - **Fractional FPS caps** (e.g. `59.9`, not just whole numbers.
 - **Separate Desktop / Fullscreen profiles** per game and for the global cap, instead of one shared setting.
-- **Sync mode control** (Async / Front Edge Sync / Back Edge Sync) per game and for the global cap.
+- **Sync mode control** (Async / Front Edge Sync / Reflex)
 - **Global FPS limit** 
 - **Hotkey Support
 - **VRR cap
