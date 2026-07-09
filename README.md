@@ -5,6 +5,7 @@ This is a fork of [mjd4219/playnite-fps-limiter](https://github.com/mjd4219/play
 - **Global FPS limit** 
 - **Hotkey Support**
 - **VRR cap**
+
 *AI ASSISTED
 
 FPS Limiter is a Playnite extension for setting per-game framerate caps when launching games through Playnite. It is mainly intended for PC games, but it can also be used with emulated games or custom entries imported into Playnite.
